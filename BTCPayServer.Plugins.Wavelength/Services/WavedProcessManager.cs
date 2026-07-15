@@ -188,6 +188,27 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         _logger.LogInformation("Stopped waved for store {StoreId}", storeId);
     }
 
+    /// <summary>
+    /// Permanently destroys this store's wallet: stops the process, deletes its on-disk datadir
+    /// (seed, DB, wallet_password file - unrecoverable, unlike the automatic-removal path this
+    /// plugin otherwise never takes, see the class doc comment), and clears the persisted
+    /// password/flags so the next EnsureStartedAsync call bootstraps a genuinely fresh wallet.
+    /// Callers are responsible for confirming this with a human first - this method itself does
+    /// not ask.
+    /// </summary>
+    public async Task DeleteStoreDataAsync(string storeId)
+    {
+        await StopStoreAsync(storeId);
+        _mnemonicCache.TakeOnce(storeId);
+        await _storeRepository.UpdateSetting<WavedStoreSettings>(storeId, WavedStoreSettings.SettingsKey, null);
+
+        var dataDir = _config.GetStoreDataDir(storeId);
+        if (Directory.Exists(dataDir))
+            Directory.Delete(dataDir, recursive: true);
+
+        _logger.LogWarning("Deleted all Wavelength wallet data for store {StoreId} at operator request", storeId);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var wavedPath = ResolveBinaryPath("waved");

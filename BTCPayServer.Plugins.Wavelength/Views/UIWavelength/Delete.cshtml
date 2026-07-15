@@ -1,0 +1,61 @@
+@model WavelengthDeleteViewModel
+@{
+    ViewData.SetLayoutModel(new LayoutModel("Wavelength-Delete", StringLocalizer["Delete Wallet"]).SetCategory("Wavelength"));
+    var hasFunds = Model.ConfirmedSat is > 0 || Model.PendingInSat > 0 || Model.PendingOutSat > 0;
+}
+
+<h2 class="mb-3">@ViewData["Title"]</h2>
+
+<div class="alert alert-danger">
+    <strong>This cannot be undone.</strong> Deleting this store's Wavelength wallet permanently
+    destroys its seed and all local data. If you have not already written down its recovery
+    phrase, any funds in it are gone forever.
+</div>
+
+@if (!string.IsNullOrEmpty(Model.ErrorMessage))
+{
+    <div class="alert alert-warning">@Model.ErrorMessage</div>
+}
+
+@if (!Model.IsRunning)
+{
+    <p class="text-muted">
+        This store's waved instance is not currently running, so its balance can't be shown here
+        - proceed with caution.
+    </p>
+}
+else if (Model.ConfirmedSat is null)
+{
+    <p class="text-muted">Could not fetch this wallet's current balance.</p>
+}
+else
+{
+    <p>
+        Current balance: <strong>@Model.ConfirmedSat.Value.ToString("N0") sats</strong>
+        @if (Model.PendingInSat > 0 || Model.PendingOutSat > 0)
+        {
+            <span class="text-muted">
+                (@Model.PendingInSat.ToString("N0") sats incoming, @Model.PendingOutSat.ToString("N0") sats outgoing)
+            </span>
+        }
+    </p>
+    @if (hasFunds)
+    {
+        <div class="alert alert-warning">
+            This wallet still holds funds. Deleting it now destroys them unless you have already
+            recorded its recovery phrase.
+        </div>
+    }
+}
+
+<form method="post" style="max-width: 400px;">
+    @Html.AntiForgeryToken()
+    <div class="mb-3">
+        <label for="confirmation" class="form-label">
+            Type <code>DELETE</code> to confirm
+        </label>
+        <input type="text" id="confirmation" name="confirmation" class="form-control" autocomplete="off" />
+    </div>
+    <button type="submit" class="btn btn-danger">Delete wallet permanently</button>
+    <a asp-action="Advanced" asp-route-storeId="@Model.StoreId" class="btn btn-link">Cancel</a>
+</form>
