@@ -8,5 +8,6 @@ namespace BTCPayServer.Plugins.Wavelength.ViewModels;
 public sealed class WavelengthMnemonicViewModel
 {
     public string StoreId { get; set; } = "";
+    public string StoreName { get; set; } = "";
     public string? Mnemonic { get; set; }
 }

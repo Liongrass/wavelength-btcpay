@@ -77,7 +77,10 @@ public partial class UIWavelengthController(
     [HttpGet("mnemonic")]
     public IActionResult Mnemonic(string storeId)
     {
+        var store = HttpContext.GetStoreDataOrNull();
+        if (store is null) return NotFound();
+
         var mnemonic = mnemonicCache.TakeOnce(storeId);
-        return View(new WavelengthMnemonicViewModel { StoreId = storeId, Mnemonic = mnemonic });
+        return View(new WavelengthMnemonicViewModel { StoreId = storeId, StoreName = store.StoreName, Mnemonic = mnemonic });
     }
 }
