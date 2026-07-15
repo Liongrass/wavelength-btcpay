@@ -26,6 +26,10 @@ namespace BTCPayServer.Plugins.Wavelength.Services;
 /// Stores are started lazily: on startup, only stores that already have wallet data on disk
 /// are restarted; a brand-new store's waved instance starts on first use via
 /// <see cref="EnsureStartedAsync"/> (called from the Lightning connection handler / setup UI).
+/// Starting the *process* is automatic and side-effect-free; creating the *wallet* (a seed) is
+/// deliberately not - see <see cref="CreateWalletAsync"/>. A store whose wallet was never
+/// explicitly created just has a running, walletless waved instance; every wallet RPC against it
+/// fails until a human clicks "Create wallet" in the dashboard.
 ///
 /// On StoreEvent.Removed the process is stopped but its --datadir is intentionally NEVER
 /// deleted automatically - that directory holds the wallet seed and DB. Cleanup of orphaned
@@ -387,81 +391,78 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
 
         await WaitForReadyAsync(storeId, process, _config.Host, port, startupStderr, cancellationToken);
 
-        try
-        {
-            await EnsureWalletInitializedAsync(storeId, channel, password);
-        }
-        catch
-        {
-            // _stores[storeId] was set above so WaitForReadyAsync could observe the process -
-            // if wallet init then fails, IsRunning(storeId) would otherwise stay true forever,
-            // and every future EnsureStartedAsync call would just no-op instead of retrying
-            // Create. Tear the half-started process down so the next call gets a clean retry.
-            _stores.TryRemove(storeId, out _);
-            channel.Dispose();
-            await TerminateProcessAsync(process);
-            process.Dispose();
-            throw;
-        }
-
         _logger.LogInformation("Started waved for store {StoreId} on port {Port} with flags: {Flags}", storeId, port,
             string.Join(' ', flags.Select(kv => kv.Value is null ? $"--{kv.Key}" : $"--{kv.Key}={kv.Value}")));
     }
 
     /// <summary>
-    /// Bootstraps a brand-new store's wallet via WalletService.Create on first boot. For a store
-    /// that already has a wallet on disk, waved's own --wallet.password_file auto-unlock (passed
-    /// at process start above) has already taken care of it by the time we get here - Status
-    /// reports Unlocked=true and there's nothing left to do.
+    /// True once this store has an actual wallet (its process must already be running - call
+    /// EnsureStartedAsync first). Starting the waved process never implies a wallet exists -
+    /// see CreateWalletAsync's doc comment for why creation is a separate, explicit step.
     /// </summary>
-    private async Task EnsureWalletInitializedAsync(string storeId, GrpcChannel channel, string password)
+    public async Task<bool> WalletExistsAsync(string storeId, CancellationToken cancellationToken = default)
     {
-        // Deliberately not the caller's token: EnsureStartedAsync is often invoked from an HTTP
-        // request (a dashboard page load), and Create must not be aborted just because that
-        // request's lifetime ends first (browser closed, reverse-proxy timeout, etc.) - a
-        // half-created wallet is worse than a slightly slow page load. Bounded by its own
-        // timeout instead, matching WaitForReadyAsync's pattern.
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var wallet = GetWalletClient(storeId);
+        if (wallet is null)
+            return false;
 
-        var wallet = new WalletServiceClient(channel);
         try
         {
-            var status = await wallet.StatusAsync(new StatusRequest(), cancellationToken: cts.Token);
-            if (status.Unlocked)
-                return;
+            var status = await wallet.StatusAsync(new StatusRequest(), cancellationToken: cancellationToken);
+            return status.Unlocked;
         }
         catch (RpcException)
         {
             // waved's Status RPC (swapwallet/service.go) unconditionally fetches the wallet
             // balance before it can report readiness, so it fails outright - rather than
-            // returning Unlocked=false - when no wallet exists yet. Fall through and attempt
-            // Create: InitWallet atomically compare-and-swaps the wallet state from None, so it
-            // can never clobber an existing wallet even if this assumption turns out wrong here.
+            // returning Unlocked=false - when no wallet exists yet.
+            return false;
         }
+    }
 
-        _logger.LogInformation("No wallet found for store {StoreId}, creating one", storeId);
+    /// <summary>
+    /// Explicitly creates this store's wallet (its process must already be running - call
+    /// EnsureStartedAsync first) and returns its mnemonic, or null if a wallet already existed
+    /// (a safe no-op - see InitWallet's atomic guard in waved/rpc_wallet.go). Deliberately never
+    /// called automatically: wallet creation generates a seed that only ever exists in memory
+    /// until the caller shows it to a human (see WavedMnemonicOnceCache) - it must never happen
+    /// as a side effect of something else (a dashboard page load, or worse, an inbound Lightning
+    /// payment attempt on a store nobody has finished setting up yet) where nobody is watching
+    /// for it.
+    /// </summary>
+    public async Task<string[]?> CreateWalletAsync(string storeId, CancellationToken cancellationToken = default)
+    {
+        var wallet = GetWalletClient(storeId)
+            ?? throw new InvalidOperationException($"waved for store {storeId} is not running");
+        var password = await _credentialStore.GetOrCreatePasswordAsync(storeId, cancellationToken);
+
+        _logger.LogInformation("Creating wallet for store {StoreId}", storeId);
         try
         {
             var response = await wallet.CreateAsync(new CreateRequest
             {
                 WalletPassword = ByteString.CopyFromUtf8(password)
-            }, cancellationToken: cts.Token);
+            }, cancellationToken: cancellationToken);
+
+            var mnemonic = response.Mnemonic.ToArray();
 
             // The mnemonic is never persisted anywhere - held in memory only until the store
             // owner views it once (see WavedMnemonicOnceCache) or the process restarts, whichever
-            // is first.
-            _mnemonicCache.Store(storeId, string.Join(' ', response.Mnemonic));
+            // is first. The caller is expected to show it immediately too; this is a fallback in
+            // case that response never renders (tab closed mid-request, connection drop, etc).
+            _mnemonicCache.Store(storeId, string.Join(' ', mnemonic));
             await _notificationSender.SendNotification(
                 new StoreScope(storeId),
                 new WavelengthWalletCreatedNotification { StoreId = storeId });
+
+            return mnemonic;
         }
         catch (RpcException ex) when (ex.StatusCode == StatusCode.FailedPrecondition)
         {
-            // Status's failure above didn't actually mean "no wallet" - InitWallet's own guard
-            // just told us a wallet already exists (presumably mid-unlock). Nothing to do.
             _logger.LogInformation(
                 "Wallet for store {StoreId} already exists ({Detail}); Create was a no-op",
                 storeId, ex.Status.Detail);
+            return null;
         }
     }
 

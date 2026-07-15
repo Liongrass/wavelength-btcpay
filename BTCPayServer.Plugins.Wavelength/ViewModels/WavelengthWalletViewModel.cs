@@ -4,6 +4,7 @@ public sealed class WavelengthWalletViewModel
 {
     public string StoreId { get; set; } = "";
     public bool IsRunning { get; set; }
+    public bool WalletExists { get; set; } = true;
     public string? StartupError { get; set; }
     public long ConfirmedSat { get; set; }
     public long PendingInSat { get; set; }

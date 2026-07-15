@@ -23,8 +23,22 @@ public sealed class WavelengthLightningClient(
     private async Task<WalletServiceClient> EnsureReadyAsync(CancellationToken cancellation)
     {
         await processManager.EnsureStartedAsync(storeId, extraFlags, cancellation);
-        return processManager.GetWalletClient(storeId)
+        var wallet = processManager.GetWalletClient(storeId)
             ?? throw new InvalidOperationException($"waved for store {storeId} is not running");
+
+        // Wallet creation is a deliberate, human-initiated action (see
+        // WavedProcessManager.CreateWalletAsync's doc comment) - it must never happen as a side
+        // effect of an inbound payment attempt on a store nobody finished setting up. Fail with a
+        // clear message instead of letting a raw "wallet is not ready (create first)" gRPC error
+        // surface from whichever RPC below happens to be first to touch the wallet.
+        if (!await processManager.WalletExistsAsync(storeId, cancellation))
+        {
+            throw new InvalidOperationException(
+                $"This store's Wavelength wallet has not been created yet. Open the store's " +
+                "Wavelength dashboard in BTCPay and click \"Create wallet\" first.");
+        }
+
+        return wallet;
     }
 
     public async Task<LightningInvoice> CreateInvoice(LightMoney amount, string description, TimeSpan expiry,

@@ -9,11 +9,14 @@ namespace BTCPayServer.Plugins.Wavelength.Controllers;
 public partial class UIWavelengthController
 {
     [HttpGet("send")]
-    public IActionResult Send(string storeId)
+    public async Task<IActionResult> Send(string storeId, CancellationToken cancellationToken)
     {
         var store = HttpContext.GetStoreDataOrNull();
         if (store is null) return NotFound();
         if (GetWavelengthConfig(store) is null) return RedirectToLightningSetup(storeId);
+
+        if (await RedirectIfNoWalletAsync(storeId, cancellationToken) is { } redirect)
+            return redirect;
 
         return View(new WavelengthSendViewModel { StoreId = storeId });
     }
@@ -28,15 +31,8 @@ public partial class UIWavelengthController
 
         model.StoreId = storeId;
 
-        try
-        {
-            await processManager.EnsureStartedAsync(storeId, cancellationToken: cancellationToken);
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or RpcException)
-        {
-            model.ErrorMessage = ex is RpcException rpcEx ? rpcEx.Status.Detail : ex.Message;
-            return View(model);
-        }
+        if (await RedirectIfNoWalletAsync(storeId, cancellationToken) is { } redirect)
+            return redirect;
 
         var wallet = processManager.GetWalletClient(storeId);
         if (wallet is null)
