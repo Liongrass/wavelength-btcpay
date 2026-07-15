@@ -32,8 +32,8 @@ public class WavelengthLightningConnectionStringHandlerTests
     [InlineData("datadir")]
     [InlineData("rpc.listenaddr")]
     [InlineData("wallet.password_file")]
-    [InlineData("no-tls")]
-    [InlineData("no-macaroons")]
+    [InlineData("rpc.notls")]
+    [InlineData("rpc.no-macaroons")]
     public void RejectsReservedFlagKeys(string reservedKey)
     {
         // Neither this nor RequiresStoreId construct a WavelengthLightningClient (both return

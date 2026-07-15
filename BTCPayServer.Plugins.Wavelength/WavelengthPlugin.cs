@@ -23,8 +23,8 @@ public class WavelengthPlugin : BaseBTCPayServerPlugin
 
     public override void Execute(IServiceCollection services)
     {
-        // waved is started with --no-tls --no-macaroons (loopback-only, plugin-owned - see
-        // WavedProcessManager), so the gRPC client needs unencrypted HTTP/2 (h2c) enabled.
+        // waved is started with --rpc.notls --rpc.no-macaroons (loopback-only, plugin-owned -
+        // see WavedProcessManager), so the gRPC client needs unencrypted HTTP/2 (h2c) enabled.
         AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
 
         services.AddSingleton<WavedConfiguration>();

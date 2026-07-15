@@ -23,8 +23,10 @@ public static class WavedReservedFlags
         "wallet.password_file",
 
         // Paired together intentionally for the loopback-only internal channel; see
-        // wavelength's INSTALL.md ("a macaroon can't ride an unencrypted connection").
-        "no-tls",
-        "no-macaroons",
+        // wavelength's INSTALL.md ("a macaroon can't ride an unencrypted connection"). Actual
+        // waved flag names are rpc.notls / rpc.no-macaroons (confirmed from waved/config.go's
+        // mapstructure tags) - not the --no-tls/--no-macaroons shorthand INSTALL.md's prose uses.
+        "rpc.notls",
+        "rpc.no-macaroons",
     };
 }

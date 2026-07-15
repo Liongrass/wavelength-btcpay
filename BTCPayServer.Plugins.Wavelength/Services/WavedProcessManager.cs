@@ -80,8 +80,8 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
 
     /// <summary>
     /// Returns a WalletService client bound to this store's waved instance, or null if it isn't
-    /// running. The channel is plaintext gRPC (h2c) - waved is started with --no-tls
-    /// --no-macaroons and only ever binds to loopback, so this is only safe because the
+    /// running. The channel is plaintext gRPC (h2c) - waved is started with --rpc.notls
+    /// --rpc.no-macaroons and only ever binds to loopback, so this is only safe because the
     /// connection never leaves the host. See WavelengthPlugin.Execute for the AppContext switch
     /// that enables unencrypted HTTP/2 on the client side.
     /// </summary>
@@ -316,9 +316,11 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         flags["wallet.password_file"] = passwordFilePath;
         // waved is only ever bound to loopback and only ever talked to by this plugin, so
         // plaintext RPC is acceptable here - a macaroon can't ride an unencrypted connection,
-        // so these two flags must be passed together (see wavelength's INSTALL.md).
-        flags["no-tls"] = null;
-        flags["no-macaroons"] = null;
+        // so these two flags must be passed together (see wavelength's INSTALL.md). Actual flag
+        // names are rpc.notls / rpc.no-macaroons (waved/config.go mapstructure tags) - NOT
+        // --no-tls/--no-macaroons, which waved rejects outright ("unknown flag").
+        flags["rpc.notls"] = null;
+        flags["rpc.no-macaroons"] = null;
 
         var startInfo = new ProcessStartInfo
         {
