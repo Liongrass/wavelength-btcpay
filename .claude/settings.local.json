@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:gitlab.com)",
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:dev.blink.sv)",
+      "WebFetch(domain:raw.githubusercontent.com)"
+    ]
+  }
+}

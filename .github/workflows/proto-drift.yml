@@ -1,0 +1,24 @@
+name: Proto drift check
+
+on:
+  pull_request:
+    paths:
+      - 'BTCPayServer.Plugins.Wavelength/Protos/**'
+      - 'scripts/check-proto-drift.sh'
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # lightninglabs/wavelength is presumably private - this job needs read access to it.
+      # Configure either a deploy key (actions/checkout-style ssh-key input against a second
+      # checkout step) or a PAT with repo read scope in a WAVELENGTH_REPO_TOKEN secret, then
+      # set WAVELENGTH_REPO below to an https://<token>@github.com/... form. Left unauthenticated
+      # for now since this repo's access model isn't decided yet.
+      - name: Check vendored protos against lightninglabs/wavelength
+        run: ./scripts/check-proto-drift.sh
+        env:
+          WAVELENGTH_REF: main

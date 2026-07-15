@@ -1,0 +1,411 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Net.Sockets;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using BTCPayServer.Events;
+using BTCPayServer.Services.Stores;
+using Grpc.Core;
+using Grpc.Net.Client;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using WalletInspectionServiceClient = Wavewalletrpc.WalletInspectionService.WalletInspectionServiceClient;
+using WalletServiceClient = Wavewalletrpc.WalletService.WalletServiceClient;
+
+namespace BTCPayServer.Plugins.Wavelength.Services;
+
+/// <summary>
+/// Manages per-store waved processes. Unlike a shared daemon, every store gets its own waved
+/// instance (own --datadir, own port) so balances/invoices never cross stores - waved is
+/// single-wallet-per-process and has no multi-tenant mode.
+///
+/// Stores are started lazily: on startup, only stores that already have wallet data on disk
+/// are restarted; a brand-new store's waved instance starts on first use via
+/// <see cref="EnsureStartedAsync"/> (called from the Lightning connection handler / setup UI).
+///
+/// On StoreEvent.Removed the process is stopped but its --datadir is intentionally NEVER
+/// deleted automatically - that directory holds the wallet seed and DB. Cleanup of orphaned
+/// store data after a real store deletion is a manual operator action.
+/// </summary>
+public sealed class WavedProcessManager : BackgroundService, IDisposable
+{
+    private readonly WavedConfiguration _config;
+    private readonly StoreRepository _storeRepository;
+    private readonly EventAggregator _eventAggregator;
+    private readonly ILogger<WavedProcessManager> _logger;
+    private readonly string _nativeDir;
+
+    private readonly ConcurrentDictionary<string, StoreProcess> _stores = new();
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _startLocks = new();
+    private readonly ConcurrentQueue<string> _removedStoreIds = new();
+    private IEventAggregatorSubscription? _storeRemovedSub;
+    private int _nextPort;
+    private bool _disposed;
+
+    public WavedProcessManager(
+        WavedConfiguration config,
+        StoreRepository storeRepository,
+        EventAggregator eventAggregator,
+        ILogger<WavedProcessManager> logger)
+    {
+        _config = config;
+        _storeRepository = storeRepository;
+        _eventAggregator = eventAggregator;
+        _logger = logger;
+        _nextPort = config.BasePort;
+
+        var assemblyDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
+            ?? throw new InvalidOperationException("Cannot determine assembly location");
+        _nativeDir = Path.Combine(assemblyDir, "Native");
+    }
+
+    public bool IsRunning(string storeId)
+        => _stores.TryGetValue(storeId, out var sp) && sp.Process is { HasExited: false };
+
+    public Uri? GetStoreUri(string storeId)
+        => _stores.TryGetValue(storeId, out var sp) ? sp.Uri : null;
+
+    /// <summary>
+    /// Returns a WalletService client bound to this store's waved instance, or null if it isn't
+    /// running. The channel is plaintext gRPC (h2c) - waved is started with --no-tls
+    /// --no-macaroons and only ever binds to loopback, so this is only safe because the
+    /// connection never leaves the host. See WavelengthPlugin.Execute for the AppContext switch
+    /// that enables unencrypted HTTP/2 on the client side.
+    /// </summary>
+    public WalletServiceClient? GetWalletClient(string storeId)
+        => _stores.TryGetValue(storeId, out var sp) ? new WalletServiceClient(sp.Channel) : null;
+
+    public WalletInspectionServiceClient? GetWalletInspectionClient(string storeId)
+        => _stores.TryGetValue(storeId, out var sp) ? new WalletInspectionServiceClient(sp.Channel) : null;
+
+    public IReadOnlyList<string> GetRunningStoreIds()
+        => _stores.Where(kv => kv.Value.Process is { HasExited: false }).Select(kv => kv.Key).ToList();
+
+    /// <summary>Starts this store's waved instance if it isn't already running. Safe to call repeatedly.</summary>
+    public async Task EnsureStartedAsync(string storeId, CancellationToken cancellationToken = default)
+    {
+        if (IsRunning(storeId))
+            return;
+
+        var startLock = _startLocks.GetOrAdd(storeId, _ => new SemaphoreSlim(1, 1));
+        await startLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (IsRunning(storeId))
+                return;
+
+            if (await _storeRepository.FindStore(storeId) is null)
+            {
+                _logger.LogWarning("Ignoring EnsureStartedAsync for non-existent store {StoreId}", storeId);
+                return;
+            }
+
+            await StartStoreAsync(storeId, cancellationToken);
+        }
+        finally
+        {
+            startLock.Release();
+        }
+    }
+
+    public async Task StopStoreAsync(string storeId)
+    {
+        if (!_stores.TryRemove(storeId, out var sp))
+            return;
+
+        await TerminateProcessAsync(sp.Process);
+        sp.Channel.Dispose();
+        sp.Process.Dispose();
+        _logger.LogInformation("Stopped waved for store {StoreId}", storeId);
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        var wavedPath = ResolveBinaryPath("waved");
+        if (!File.Exists(wavedPath))
+        {
+            _logger.LogWarning(
+                "waved binary not found at {Path} (rid: {Rid}) - per-store wallets will not start. " +
+                "Place the waved binary under Native/{Rid}/waved.",
+                wavedPath, GetRuntimeIdentifier(), GetRuntimeIdentifier());
+            return;
+        }
+
+        _storeRemovedSub = _eventAggregator.Subscribe<StoreEvent.Removed>((_, ev) =>
+        {
+            _logger.LogInformation("Store {StoreId} removed, queuing waved shutdown (data is kept on disk)", ev.StoreId);
+            _removedStoreIds.Enqueue(ev.StoreId);
+        });
+
+        try
+        {
+            // Only restart waved for stores that were previously initialized (have wallet data
+            // on disk). A brand-new store starts on demand via EnsureStartedAsync.
+            var storesDir = Path.Combine(_config.DataDir, "stores");
+            if (Directory.Exists(storesDir))
+            {
+                foreach (var dir in Directory.EnumerateDirectories(storesDir))
+                {
+                    if (stoppingToken.IsCancellationRequested) break;
+
+                    var storeId = Path.GetFileName(dir);
+                    if (!Directory.EnumerateFileSystemEntries(dir).Any())
+                        continue;
+
+                    if (await _storeRepository.FindStore(storeId) is null)
+                    {
+                        _logger.LogInformation("Skipping orphaned wallet directory for deleted store {StoreId}", storeId);
+                        continue;
+                    }
+
+                    await EnsureStartedAsync(storeId, stoppingToken);
+                }
+            }
+
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+
+                while (_removedStoreIds.TryDequeue(out var removedId))
+                {
+                    try
+                    {
+                        await StopStoreAsync(removedId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to stop waved for removed store {StoreId}", removedId);
+                    }
+                }
+
+                foreach (var (storeId, sp) in _stores.ToArray())
+                {
+                    if (sp.Process is not { HasExited: true })
+                        continue;
+
+                    _logger.LogWarning(
+                        "waved for store {StoreId} exited unexpectedly with code {ExitCode}, restarting",
+                        storeId, sp.Process.ExitCode);
+                    sp.Process.Dispose();
+                    _stores.TryRemove(storeId, out _);
+
+                    try
+                    {
+                        await EnsureStartedAsync(storeId, stoppingToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to restart waved for store {StoreId}", storeId);
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "WavedProcessManager failed");
+        }
+        finally
+        {
+            _storeRemovedSub?.Dispose();
+            await Task.WhenAll(_stores.Keys.Select(StopStoreAsync));
+        }
+    }
+
+    private async Task StartStoreAsync(string storeId, CancellationToken cancellationToken)
+    {
+        var dataDir = _config.GetStoreDataDir(storeId);
+        Directory.CreateDirectory(dataDir);
+
+        var port = Interlocked.Increment(ref _nextPort) - 1;
+        var uri = new Uri($"http://{_config.Host}:{port}");
+        var wavedPath = ResolveBinaryPath("waved");
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = wavedPath,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        startInfo.ArgumentList.Add("--datadir");
+        startInfo.ArgumentList.Add(dataDir);
+        startInfo.ArgumentList.Add("--network");
+        startInfo.ArgumentList.Add(_config.Network);
+        startInfo.ArgumentList.Add("--rpc.listenaddr");
+        startInfo.ArgumentList.Add($"{_config.Host}:{port}");
+        // waved is only ever bound to loopback and only ever talked to by this plugin, so
+        // plaintext RPC is acceptable here - a macaroon can't ride an unencrypted connection,
+        // so these two flags must be passed together (see wavelength's INSTALL.md).
+        startInfo.ArgumentList.Add("--no-tls");
+        startInfo.ArgumentList.Add("--no-macaroons");
+
+        var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        process.OutputDataReceived += (_, e) => LogOutput(storeId, e.Data, isError: false);
+        process.ErrorDataReceived += (_, e) => LogOutput(storeId, e.Data, isError: true);
+
+        if (!process.Start())
+            throw new InvalidOperationException($"Failed to start waved for store {storeId}");
+
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        // GrpcChannel.ForAddress doesn't connect eagerly - the actual connection attempt happens
+        // on the first RPC call, by which point WaitForReadyAsync below has confirmed the port is
+        // accepting connections.
+        var channel = GrpcChannel.ForAddress(uri, new GrpcChannelOptions { Credentials = ChannelCredentials.Insecure });
+        _stores[storeId] = new StoreProcess(process, uri, port, channel);
+
+        await WaitForReadyAsync(storeId, process, _config.Host, port, cancellationToken);
+
+        // TODO: once the wavewalletrpc gRPC client is vendored (see proto sync plan), call the
+        // WalletService.Create RPC here on first start instead of just waiting for the port to
+        // open - waved exposes wallet creation over RPC directly, no separate CLI step needed
+        // (unlike bark, which shells out to a separate `bark create` binary).
+        _logger.LogInformation("Started waved for store {StoreId} on port {Port}", storeId, port);
+    }
+
+    private async Task WaitForReadyAsync(string storeId, Process process, string host, int port, CancellationToken cancellationToken)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(30));
+        var delayMs = 50;
+        while (!timeoutCts.IsCancellationRequested)
+        {
+            if (process.HasExited)
+            {
+                if (_stores.TryRemove(storeId, out var failed))
+                    failed.Channel.Dispose();
+                throw new InvalidOperationException(
+                    $"waved for store {storeId} exited during startup with code {process.ExitCode}");
+            }
+            try
+            {
+                using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                await socket.ConnectAsync(host, port, timeoutCts.Token);
+                return;
+            }
+            catch (SocketException) { }
+            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested) { break; }
+            try { await Task.Delay(delayMs, timeoutCts.Token); }
+            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested) { break; }
+            delayMs = Math.Min(delayMs * 2, 500);
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        throw new TimeoutException($"waved for store {storeId} did not become ready on {host}:{port} within 30 seconds");
+    }
+
+    private async Task TerminateProcessAsync(Process process)
+    {
+        if (process.HasExited)
+            return;
+
+        _logger.LogInformation("Stopping waved (PID {Pid})", process.Id);
+
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+        {
+            try
+            {
+                var killInfo = new ProcessStartInfo
+                {
+                    FileName = "kill",
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                killInfo.ArgumentList.Add("-TERM");
+                killInfo.ArgumentList.Add(process.Id.ToString());
+                using var kill = Process.Start(killInfo);
+                kill?.WaitForExit(1000);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "SIGTERM failed, falling back to Kill()");
+            }
+
+            if (await WaitForExitAsync(process, TimeSpan.FromSeconds(10)))
+                return;
+
+            _logger.LogWarning("waved did not exit gracefully, forcing termination");
+        }
+
+        process.Kill(entireProcessTree: true);
+        await WaitForExitAsync(process, TimeSpan.FromSeconds(5));
+    }
+
+    private static async Task<bool> WaitForExitAsync(Process process, TimeSpan timeout)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+        try
+        {
+            await process.WaitForExitAsync(cts.Token);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
+    internal static string GetRuntimeIdentifier()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            return RuntimeInformation.OSArchitecture switch
+            {
+                Architecture.X64 => "linux-x64",
+                Architecture.Arm64 => "linux-arm64",
+                _ => throw new PlatformNotSupportedException(
+                    $"Unsupported Linux architecture: {RuntimeInformation.OSArchitecture}")
+            };
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            return RuntimeInformation.OSArchitecture switch
+            {
+                Architecture.X64 => "osx-x64",
+                Architecture.Arm64 => "osx-arm64",
+                _ => throw new PlatformNotSupportedException(
+                    $"Unsupported macOS architecture: {RuntimeInformation.OSArchitecture}")
+            };
+        }
+
+        throw new PlatformNotSupportedException($"Unsupported OS: {RuntimeInformation.OSDescription}");
+    }
+
+    private string ResolveBinaryPath(string binaryName)
+        => Path.Combine(_nativeDir, GetRuntimeIdentifier(), binaryName);
+
+    private void LogOutput(string storeId, string? data, bool isError)
+    {
+        if (string.IsNullOrEmpty(data))
+            return;
+
+        if (isError)
+            _logger.LogWarning("[waved:{StoreId}] {Output}", storeId, data);
+        else
+            _logger.LogDebug("[waved:{StoreId}] {Output}", storeId, data);
+    }
+
+    public override void Dispose()
+    {
+        if (_disposed) return;
+
+        foreach (var sp in _stores.Values)
+        {
+            sp.Channel.Dispose();
+            sp.Process.Dispose();
+        }
+        _stores.Clear();
+
+        foreach (var startLock in _startLocks.Values)
+            startLock.Dispose();
+        _startLocks.Clear();
+
+        _disposed = true;
+        base.Dispose();
+    }
+
+    private sealed record StoreProcess(Process Process, Uri Uri, int Port, GrpcChannel Channel);
+}

@@ -1,0 +1,41 @@
+@model BTCPayServer.Models.StoreViewModels.LightningNodeViewModel
+@{
+    var storeId = Model.StoreId;
+    if (Model.CryptoCode != "BTC")
+    {
+        return;
+    }
+}
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const customNodeAccordion = document.getElementById("CustomNodeSupport");
+        const template = document.getElementById("wavelength-ln-setup");
+        if (customNodeAccordion && template) {
+            customNodeAccordion.appendChild(template.content.cloneNode(true));
+        }
+    });
+</script>
+
+<template id="wavelength-ln-setup">
+    <div class="accordion-item">
+        <h2 class="accordion-header" id="CustomWavelengthHeader">
+            <button type="button" class="accordion-button collapsed" data-bs-toggle="collapse" data-bs-target="#CustomWavelengthContent" aria-controls="CustomWavelengthContent" aria-expanded="false">
+                <span><strong>Wavelength</strong> - Ark + Lightning</span>
+                <vc:icon symbol="caret-down"/>
+            </button>
+        </h2>
+        <div id="CustomWavelengthContent" class="accordion-collapse collapse" aria-labelledby="CustomWavelengthHeader" data-bs-parent="#CustomNodeSupport">
+            <div class="accordion-body">
+                <ul class="pb-2">
+                    <li>
+                        <code><b>type=</b>wavelength;<b>store-id=</b>@storeId</code>
+                    </li>
+                </ul>
+                <!-- TODO: link to a Wavelength settings/setup page once one exists, mirroring
+                     bark-btcpay's "Bark settings" link, so users can initialize/back up the
+                     store's wallet before pointing BTCPay's Lightning connection at it. -->
+            </div>
+        </div>
+    </div>
+</template>
