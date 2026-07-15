@@ -1,3 +1,6 @@
+using BTCPayServer.Configuration;
+using Microsoft.Extensions.Options;
+
 namespace BTCPayServer.Plugins.Wavelength.Services;
 
 /// <summary>
@@ -18,10 +21,14 @@ public sealed class WavedConfiguration
     /// <summary>Network passed to waved via --network (mainnet, testnet, testnet4, signet, regtest, simnet).</summary>
     public string Network { get; }
 
-    public WavedConfiguration()
+    public WavedConfiguration(IOptions<DataDirectories> dataDirectories)
     {
+        // DataDirectories.DataDir is BTCPay's own persistent data directory (the one operators
+        // back up and that survives container/binary upgrades) - not AppContext.BaseDirectory,
+        // which is wherever BTCPay's own binaries happen to be unpacked and can be wiped on
+        // every redeploy. Getting this wrong would put real wallet seeds at risk.
         DataDir = Environment.GetEnvironmentVariable("WAVELENGTH_DATADIR")
-            ?? Path.Combine(AppContext.BaseDirectory, "wavelength-data");
+            ?? Path.Combine(dataDirectories.Value.DataDir, "Plugins", "Wavelength");
         Host = Environment.GetEnvironmentVariable("WAVELENGTH_HOST") ?? "127.0.0.1";
         BasePort = int.TryParse(Environment.GetEnvironmentVariable("WAVELENGTH_BASE_PORT"), out var p) ? p : 10029;
         Network = Environment.GetEnvironmentVariable("WAVELENGTH_NETWORK") ?? "mainnet";
