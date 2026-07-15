@@ -94,18 +94,31 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     public IReadOnlyList<string> GetRunningStoreIds()
         => _stores.Where(kv => kv.Value.Process is { HasExited: false }).Select(kv => kv.Key).ToList();
 
-    /// <summary>Starts this store's waved instance if it isn't already running. Safe to call repeatedly.</summary>
-    public async Task EnsureStartedAsync(string storeId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Starts this store's waved instance if it isn't already running. Safe to call repeatedly.
+    /// <paramref name="extraFlags"/> are extra waved CLI flags parsed from the store's
+    /// connection string (see WavelengthLightningConnectionStringHandler) - pass null from
+    /// internal callers (crash recovery, startup restart) that don't have a live connection
+    /// string to hand; the last-known flags persisted via a real connection string are reused.
+    /// If the store is already running, a fresh non-null extraFlags is persisted for the *next*
+    /// restart but does not affect the already-running process - waved has no config-reload RPC.
+    /// </summary>
+    public async Task EnsureStartedAsync(
+        string storeId, IReadOnlyDictionary<string, string>? extraFlags = null, CancellationToken cancellationToken = default)
     {
-        if (IsRunning(storeId))
-            return;
-
         var startLock = _startLocks.GetOrAdd(storeId, _ => new SemaphoreSlim(1, 1));
         await startLock.WaitAsync(cancellationToken);
         try
         {
+            if (extraFlags is not null)
+                await PersistFlagsAsync(storeId, extraFlags, cancellationToken);
+
             if (IsRunning(storeId))
+            {
+                if (extraFlags is not null)
+                    WarnIfFlagsDiffer(storeId, extraFlags);
                 return;
+            }
 
             if (await _storeRepository.FindStore(storeId) is null)
             {
@@ -113,12 +126,47 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
                 return;
             }
 
-            await StartStoreAsync(storeId, cancellationToken);
+            var resolvedFlags = extraFlags ?? await LoadPersistedFlagsAsync(storeId, cancellationToken);
+            await StartStoreAsync(storeId, resolvedFlags, cancellationToken);
         }
         finally
         {
             startLock.Release();
         }
+    }
+
+    private async Task PersistFlagsAsync(
+        string storeId, IReadOnlyDictionary<string, string> extraFlags, CancellationToken cancellationToken)
+    {
+        _ = cancellationToken;
+        var settings = await _storeRepository.GetSettingAsync<WavedStoreSettings>(storeId, WavedStoreSettings.SettingsKey)
+            ?? new WavedStoreSettings();
+        await _storeRepository.UpdateSetting(storeId, WavedStoreSettings.SettingsKey, settings with
+        {
+            ExtraWavedFlags = new Dictionary<string, string>(extraFlags, StringComparer.OrdinalIgnoreCase)
+        });
+    }
+
+    private async Task<IReadOnlyDictionary<string, string>> LoadPersistedFlagsAsync(string storeId, CancellationToken cancellationToken)
+    {
+        _ = cancellationToken;
+        var settings = await _storeRepository.GetSettingAsync<WavedStoreSettings>(storeId, WavedStoreSettings.SettingsKey);
+        return settings?.ExtraWavedFlags ?? new Dictionary<string, string>();
+    }
+
+    private void WarnIfFlagsDiffer(string storeId, IReadOnlyDictionary<string, string> extraFlags)
+    {
+        if (!_stores.TryGetValue(storeId, out var sp))
+            return;
+
+        if (sp.Flags.Count == extraFlags.Count &&
+            sp.Flags.All(kv => extraFlags.TryGetValue(kv.Key, out var v) && v == kv.Value))
+            return;
+
+        _logger.LogWarning(
+            "Store {StoreId}'s connection string flags changed, but its waved instance is already " +
+            "running with the previous ones - stop it (or restart BTCPay Server) to apply the change.",
+            storeId);
     }
 
     public async Task StopStoreAsync(string storeId)
@@ -171,7 +219,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
                         continue;
                     }
 
-                    await EnsureStartedAsync(storeId, stoppingToken);
+                    await EnsureStartedAsync(storeId, cancellationToken: stoppingToken);
                 }
             }
 
@@ -204,7 +252,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
 
                     try
                     {
-                        await EnsureStartedAsync(storeId, stoppingToken);
+                        await EnsureStartedAsync(storeId, cancellationToken: stoppingToken);
                     }
                     catch (Exception ex)
                     {
@@ -225,7 +273,8 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         }
     }
 
-    private async Task StartStoreAsync(string storeId, CancellationToken cancellationToken)
+    private async Task StartStoreAsync(
+        string storeId, IReadOnlyDictionary<string, string> extraFlags, CancellationToken cancellationToken)
     {
         var dataDir = _config.GetStoreDataDir(storeId);
         Directory.CreateDirectory(dataDir);
@@ -241,6 +290,28 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         var uri = new Uri($"http://{_config.Host}:{port}");
         var wavedPath = ResolveBinaryPath("waved");
 
+        // Server-wide default first, then whatever the store's connection string actually asked
+        // for (skipping anything WavedReservedFlags owns - the connection string handler already
+        // rejects those at Create() time, this is defense in depth), then the plugin-owned flags
+        // always win regardless of what's upstream of them.
+        var flags = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["network"] = _config.Network,
+        };
+        foreach (var (key, value) in extraFlags)
+        {
+            if (!WavedReservedFlags.Keys.Contains(key))
+                flags[key] = value;
+        }
+        flags["datadir"] = dataDir;
+        flags["rpc.listenaddr"] = $"{_config.Host}:{port}";
+        flags["wallet.password_file"] = passwordFilePath;
+        // waved is only ever bound to loopback and only ever talked to by this plugin, so
+        // plaintext RPC is acceptable here - a macaroon can't ride an unencrypted connection,
+        // so these two flags must be passed together (see wavelength's INSTALL.md).
+        flags["no-tls"] = null;
+        flags["no-macaroons"] = null;
+
         var startInfo = new ProcessStartInfo
         {
             FileName = wavedPath,
@@ -249,19 +320,12 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
             UseShellExecute = false,
             CreateNoWindow = true
         };
-        startInfo.ArgumentList.Add("--datadir");
-        startInfo.ArgumentList.Add(dataDir);
-        startInfo.ArgumentList.Add("--network");
-        startInfo.ArgumentList.Add(_config.Network);
-        startInfo.ArgumentList.Add("--rpc.listenaddr");
-        startInfo.ArgumentList.Add($"{_config.Host}:{port}");
-        startInfo.ArgumentList.Add("--wallet.password_file");
-        startInfo.ArgumentList.Add(passwordFilePath);
-        // waved is only ever bound to loopback and only ever talked to by this plugin, so
-        // plaintext RPC is acceptable here - a macaroon can't ride an unencrypted connection,
-        // so these two flags must be passed together (see wavelength's INSTALL.md).
-        startInfo.ArgumentList.Add("--no-tls");
-        startInfo.ArgumentList.Add("--no-macaroons");
+        foreach (var (key, value) in flags)
+        {
+            startInfo.ArgumentList.Add($"--{key}");
+            if (value is not null)
+                startInfo.ArgumentList.Add(value);
+        }
 
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         process.OutputDataReceived += (_, e) => LogOutput(storeId, e.Data, isError: false);
@@ -277,12 +341,13 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         // on the first RPC call, by which point WaitForReadyAsync below has confirmed the port is
         // accepting connections.
         var channel = GrpcChannel.ForAddress(uri, new GrpcChannelOptions { Credentials = ChannelCredentials.Insecure });
-        _stores[storeId] = new StoreProcess(process, uri, port, channel);
+        _stores[storeId] = new StoreProcess(process, uri, port, channel, extraFlags);
 
         await WaitForReadyAsync(storeId, process, _config.Host, port, cancellationToken);
         await EnsureWalletInitializedAsync(storeId, channel, password, cancellationToken);
 
-        _logger.LogInformation("Started waved for store {StoreId} on port {Port}", storeId, port);
+        _logger.LogInformation("Started waved for store {StoreId} on port {Port} with flags: {Flags}", storeId, port,
+            string.Join(' ', flags.Select(kv => kv.Value is null ? $"--{kv.Key}" : $"--{kv.Key}={kv.Value}")));
     }
 
     /// <summary>
@@ -463,5 +528,6 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         base.Dispose();
     }
 
-    private sealed record StoreProcess(Process Process, Uri Uri, int Port, GrpcChannel Channel);
+    private sealed record StoreProcess(
+        Process Process, Uri Uri, int Port, GrpcChannel Channel, IReadOnlyDictionary<string, string> Flags);
 }

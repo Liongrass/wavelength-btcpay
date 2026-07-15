@@ -31,7 +31,19 @@
                     <li>
                         <code><b>type=</b>wavelength;<b>store-id=</b>@storeId</code>
                     </li>
+                    <li>
+                        <code><b>type=</b>wavelength;<b>store-id=</b>@storeId;<b>network=</b>regtest</code>
+                    </li>
                 </ul>
+                <p class="my-2">
+                    Besides <code>store-id</code>, any flag <code>waved</code> itself accepts can be added the
+                    same way - e.g. <code>network</code>, <code>wallet.esploraurl</code>, <code>server.host</code>.
+                    They're passed straight through as <code>--flag value</code> on this store's <code>waved</code>
+                    process. A handful of flags (<code>datadir</code>, <code>rpc.listenaddr</code>,
+                    <code>wallet.password_file</code>, <code>no-tls</code>, <code>no-macaroons</code>) are managed
+                    by the plugin and cannot be overridden here. Changing flags on an already-running store takes
+                    effect on its next restart, not immediately.
+                </p>
                 <!-- TODO: link to a Wavelength settings/setup page once one exists, mirroring
                      bark-btcpay's "Bark settings" link, so users can initialize/back up the
                      store's wallet before pointing BTCPay's Lightning connection at it. -->

@@ -27,4 +27,20 @@ public class WavelengthLightningConnectionStringHandlerTests
         Assert.Null(client);
         Assert.NotNull(error);
     }
+
+    [Theory]
+    [InlineData("datadir")]
+    [InlineData("rpc.listenaddr")]
+    [InlineData("wallet.password_file")]
+    [InlineData("no-tls")]
+    [InlineData("no-macaroons")]
+    public void RejectsReservedFlagKeys(string reservedKey)
+    {
+        // Neither this nor RequiresStoreId construct a WavelengthLightningClient (both return
+        // before reaching ActivatorUtilities.CreateInstance), so null! is safe here too.
+        var client = _handler.Create($"type=wavelength;store-id=abc;{reservedKey}=x", Network.Main, out var error);
+
+        Assert.Null(client);
+        Assert.Contains(reservedKey, error);
+    }
 }

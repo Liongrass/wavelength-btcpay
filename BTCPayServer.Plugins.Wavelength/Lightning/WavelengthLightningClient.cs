@@ -17,11 +17,12 @@ namespace BTCPayServer.Plugins.Wavelength.Lightning;
 public sealed class WavelengthLightningClient(
     WavedProcessManager processManager,
     Network network,
-    string storeId) : ILightningClient
+    string storeId,
+    IReadOnlyDictionary<string, string> extraFlags) : ILightningClient
 {
     private async Task<WalletServiceClient> EnsureReadyAsync(CancellationToken cancellation)
     {
-        await processManager.EnsureStartedAsync(storeId, cancellation);
+        await processManager.EnsureStartedAsync(storeId, extraFlags, cancellation);
         return processManager.GetWalletClient(storeId)
             ?? throw new InvalidOperationException($"waved for store {storeId} is not running");
     }
@@ -184,7 +185,11 @@ public sealed class WavelengthLightningClient(
     public Task<LightningChannel[]> ListChannels(CancellationToken cancellation = default)
         => throw new NotSupportedException();
 
-    public override string ToString() => $"type=wavelength;store-id={storeId}";
+    public override string ToString()
+    {
+        var extra = string.Concat(extraFlags.Select(kv => $";{kv.Key}={kv.Value}"));
+        return $"type=wavelength;store-id={storeId}{extra}";
+    }
 
     private static LightningInvoice ToLightningInvoice(WalletEntry entry) => new()
     {
