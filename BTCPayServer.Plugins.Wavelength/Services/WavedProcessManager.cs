@@ -440,12 +440,25 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     /// as a side effect of something else (a dashboard page load, or worse, an inbound Lightning
     /// payment attempt on a store nobody has finished setting up yet) where nobody is watching
     /// for it.
+    ///
+    /// Deliberately takes no CancellationToken parameter: this is invoked from an HTTP request
+    /// (the "Create wallet" button), and once Create is sent there is no safe way to abort it -
+    /// InitWallet's server-side effects are already committed by the time it returns, so
+    /// cancelling our wait for the response would silently orphan the mnemonic. That is exactly
+    /// what happened before this fix: the request appeared to time out, the wallet was created
+    /// regardless, and the mnemonic was never received - and thus never shown to anyone - because
+    /// our own code stopped waiting for the response. A token parameter here would invite exactly
+    /// that mistake again, so there deliberately isn't one; this method always runs to its own
+    /// internal timeout regardless of what happens to the caller's request.
     /// </summary>
-    public async Task<string[]?> CreateWalletAsync(string storeId, CancellationToken cancellationToken = default)
+    public async Task<string[]?> CreateWalletAsync(string storeId)
     {
         var wallet = GetWalletClient(storeId)
             ?? throw new InvalidOperationException($"waved for store {storeId} is not running");
-        var password = await _credentialStore.GetOrCreatePasswordAsync(storeId, cancellationToken);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        var password = await _credentialStore.GetOrCreatePasswordAsync(storeId, cts.Token);
 
         _logger.LogInformation("Creating wallet for store {StoreId}", storeId);
         try
@@ -453,7 +466,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
             var response = await wallet.CreateAsync(new CreateRequest
             {
                 WalletPassword = ByteString.CopyFromUtf8(password)
-            }, cancellationToken: cancellationToken);
+            }, cancellationToken: cts.Token);
 
             var mnemonic = response.Mnemonic.ToArray();
 

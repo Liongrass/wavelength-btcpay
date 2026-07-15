@@ -80,7 +80,7 @@ public partial class UIWavelengthController
         try
         {
             await processManager.EnsureStartedAsync(storeId, cancellationToken: cancellationToken);
-            var mnemonic = await processManager.CreateWalletAsync(storeId, cancellationToken);
+            var mnemonic = await processManager.CreateWalletAsync(storeId);
             if (mnemonic is null)
             {
                 TempData[WellKnownTempData.ErrorMessage] = "A wallet already exists for this store.";
