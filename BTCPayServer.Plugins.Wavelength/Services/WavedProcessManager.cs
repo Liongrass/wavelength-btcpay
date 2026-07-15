@@ -196,15 +196,26 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     /// Permanently destroys this store's wallet: stops the process, deletes its on-disk datadir
     /// (seed, DB, wallet_password file - unrecoverable, unlike the automatic-removal path this
     /// plugin otherwise never takes, see the class doc comment), and clears the persisted
-    /// password/flags so the next EnsureStartedAsync call bootstraps a genuinely fresh wallet.
-    /// Callers are responsible for confirming this with a human first - this method itself does
-    /// not ask.
+    /// password so the next Create bootstraps a genuinely fresh wallet. Deliberately does NOT
+    /// clear ExtraWavedFlags - network/wallet.type/wallet.feeurl etc. are configuration for how
+    /// this store should run, not part of the wallet/seed being destroyed; wiping them here would
+    /// silently fall back to server defaults (e.g. mainnet) on the next start, which is exactly
+    /// what happened before this was fixed. Callers are responsible for confirming this with a
+    /// human first - this method itself does not ask.
     /// </summary>
     public async Task DeleteStoreDataAsync(string storeId)
     {
         await StopStoreAsync(storeId);
         _mnemonicCache.TakeOnce(storeId);
-        await _storeRepository.UpdateSetting<WavedStoreSettings>(storeId, WavedStoreSettings.SettingsKey, null);
+
+        var settings = await _storeRepository.GetSettingAsync<WavedStoreSettings>(storeId, WavedStoreSettings.SettingsKey);
+        if (settings is not null)
+        {
+            await _storeRepository.UpdateSetting(storeId, WavedStoreSettings.SettingsKey, settings with
+            {
+                EncryptedWalletPassword = null
+            });
+        }
 
         var dataDir = _config.GetStoreDataDir(storeId);
         if (Directory.Exists(dataDir))
