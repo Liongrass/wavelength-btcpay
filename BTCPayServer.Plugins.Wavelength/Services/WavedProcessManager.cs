@@ -424,22 +424,45 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         var wallet = new WalletServiceClient(channel);
-        var status = await wallet.StatusAsync(new StatusRequest(), cancellationToken: cts.Token);
-        if (status.Unlocked)
-            return;
+        try
+        {
+            var status = await wallet.StatusAsync(new StatusRequest(), cancellationToken: cts.Token);
+            if (status.Unlocked)
+                return;
+        }
+        catch (RpcException)
+        {
+            // waved's Status RPC (swapwallet/service.go) unconditionally fetches the wallet
+            // balance before it can report readiness, so it fails outright - rather than
+            // returning Unlocked=false - when no wallet exists yet. Fall through and attempt
+            // Create: InitWallet atomically compare-and-swaps the wallet state from None, so it
+            // can never clobber an existing wallet even if this assumption turns out wrong here.
+        }
 
         _logger.LogInformation("No wallet found for store {StoreId}, creating one", storeId);
-        var response = await wallet.CreateAsync(new CreateRequest
+        try
         {
-            WalletPassword = ByteString.CopyFromUtf8(password)
-        }, cancellationToken: cts.Token);
+            var response = await wallet.CreateAsync(new CreateRequest
+            {
+                WalletPassword = ByteString.CopyFromUtf8(password)
+            }, cancellationToken: cts.Token);
 
-        // The mnemonic is never persisted anywhere - held in memory only until the store owner
-        // views it once (see WavedMnemonicOnceCache) or the process restarts, whichever is first.
-        _mnemonicCache.Store(storeId, string.Join(' ', response.Mnemonic));
-        await _notificationSender.SendNotification(
-            new StoreScope(storeId),
-            new WavelengthWalletCreatedNotification { StoreId = storeId });
+            // The mnemonic is never persisted anywhere - held in memory only until the store
+            // owner views it once (see WavedMnemonicOnceCache) or the process restarts, whichever
+            // is first.
+            _mnemonicCache.Store(storeId, string.Join(' ', response.Mnemonic));
+            await _notificationSender.SendNotification(
+                new StoreScope(storeId),
+                new WavelengthWalletCreatedNotification { StoreId = storeId });
+        }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.FailedPrecondition)
+        {
+            // Status's failure above didn't actually mean "no wallet" - InitWallet's own guard
+            // just told us a wallet already exists (presumably mid-unlock). Nothing to do.
+            _logger.LogInformation(
+                "Wallet for store {StoreId} already exists ({Detail}); Create was a no-op",
+                storeId, ex.Status.Detail);
+        }
     }
 
     private static string WritePasswordFile(string dataDir, string password)

@@ -22,9 +22,10 @@ public partial class UIWavelengthController
         {
             await processManager.EnsureStartedAsync(storeId, cancellationToken: cancellationToken);
         }
-        catch (Exception ex) when (ex is InvalidOperationException or TimeoutException)
+        catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or RpcException)
         {
-            return View(new WavelengthWalletViewModel { StoreId = storeId, IsRunning = false, StartupError = ex.Message });
+            var detail = ex is RpcException rpcEx ? rpcEx.Status.Detail : ex.Message;
+            return View(new WavelengthWalletViewModel { StoreId = storeId, IsRunning = false, StartupError = detail });
         }
 
         var wallet = processManager.GetWalletClient(storeId);

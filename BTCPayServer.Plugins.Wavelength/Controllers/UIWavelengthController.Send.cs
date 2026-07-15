@@ -32,9 +32,9 @@ public partial class UIWavelengthController
         {
             await processManager.EnsureStartedAsync(storeId, cancellationToken: cancellationToken);
         }
-        catch (Exception ex) when (ex is InvalidOperationException or TimeoutException)
+        catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or RpcException)
         {
-            model.ErrorMessage = ex.Message;
+            model.ErrorMessage = ex is RpcException rpcEx ? rpcEx.Status.Detail : ex.Message;
             return View(model);
         }
 
