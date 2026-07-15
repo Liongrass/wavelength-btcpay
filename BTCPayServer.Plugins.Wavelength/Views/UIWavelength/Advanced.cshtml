@@ -1,0 +1,67 @@
+@model WavelengthAdvancedViewModel
+@{
+    ViewData.SetLayoutModel(new LayoutModel("Wavelength-Advanced", StringLocalizer["Advanced"]).SetCategory("Wavelength"));
+}
+
+<h2 class="mb-3">@ViewData["Title"]</h2>
+
+<div class="widget mb-4">
+    <h6 class="mb-3">waved getinfo</h6>
+    @if (!Model.IsRunning)
+    {
+        <p class="text-muted">This store's waved instance is not currently running.</p>
+    }
+    else
+    {
+        <dl class="row mb-0">
+            <dt class="col-3">Version</dt>
+            <dd class="col-9">@Model.Version (@Model.Commit)</dd>
+            <dt class="col-3">Network</dt>
+            <dd class="col-9">@Model.Network</dd>
+            <dt class="col-3">Block height</dt>
+            <dd class="col-9">@Model.BlockHeight.ToString("N0")</dd>
+            <dt class="col-3">Server connected</dt>
+            <dd class="col-9">@Model.ServerConnected</dd>
+            <dt class="col-3">Wallet type</dt>
+            <dd class="col-9">@Model.WalletType</dd>
+            <dt class="col-3">Wallet state</dt>
+            <dd class="col-9">@Model.WalletState</dd>
+            <dt class="col-3">Identity pubkey</dt>
+            <dd class="col-9"><code>@Model.IdentityPubkey</code></dd>
+        </dl>
+    }
+</div>
+
+<div class="widget">
+    <h6 class="mb-3">How this wallet is configured</h6>
+    <dl class="row mb-0">
+        <dt class="col-3">Running</dt>
+        <dd class="col-9">@Model.IsRunning</dd>
+        <dt class="col-3">Data directory</dt>
+        <dd class="col-9"><code>@Model.DataDir</code></dd>
+        <dt class="col-3">Port</dt>
+        <dd class="col-9">@(Model.Port?.ToString() ?? "-")</dd>
+        <dt class="col-3">Extra flags</dt>
+        <dd class="col-9">
+            @if (Model.Flags.Count == 0)
+            {
+                <span class="text-muted">None - using plugin defaults.</span>
+            }
+            else
+            {
+                <ul class="mb-0">
+                    @foreach (var (key, value) in Model.Flags)
+                    {
+                        <li><code>--@key @value</code></li>
+                    }
+                </ul>
+            }
+        </dd>
+    </dl>
+    <p class="text-muted mt-3 mb-0">
+        Set these via this store's Lightning connection string
+        (<code>type=wavelength;store-id=...;flag=value</code>) - see the
+        <a asp-controller="UIStores" asp-action="SetupLightningNode" asp-route-storeId="@Model.StoreId" asp-route-cryptoCode="BTC">connection setup page</a>.
+        Changing a flag takes effect on this store's next waved restart, not immediately.
+    </p>
+</div>

@@ -1,0 +1,36 @@
+@using BTCPayServer
+@model BTCPayServer.Components.MainNav.MainNavViewModel
+
+@{
+    var store = Context.GetStoreData();
+}
+
+@if (store != null)
+{
+    <li class="nav-item">
+        <a layout-menu-item="Wavelength-Index" layout-menu-item-category="Wavelength"
+           asp-controller="UIWavelength" asp-action="Index"
+           asp-route-storeId="@store.Id"
+           id="StoreNav-Wavelength">
+            <span>Wavelength</span>
+        </a>
+    </li>
+    @if (ViewData.IsCategory("Wavelength"))
+    {
+        <li class="nav-item nav-item-sub">
+            <a layout-menu-item="Wavelength-Send"
+               asp-controller="UIWavelength" asp-action="Send"
+               asp-route-storeId="@store.Id">Send</a>
+        </li>
+        <li class="nav-item nav-item-sub">
+            <a layout-menu-item="Wavelength-Receive"
+               asp-controller="UIWavelength" asp-action="Receive"
+               asp-route-storeId="@store.Id">Receive</a>
+        </li>
+        <li class="nav-item nav-item-sub">
+            <a layout-menu-item="Wavelength-Advanced"
+               asp-controller="UIWavelength" asp-action="Advanced"
+               asp-route-storeId="@store.Id">Advanced</a>
+        </li>
+    }
+}

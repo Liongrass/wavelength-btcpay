@@ -91,6 +91,14 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     public WalletInspectionServiceClient? GetWalletInspectionClient(string storeId)
         => _stores.TryGetValue(storeId, out var sp) ? new WalletInspectionServiceClient(sp.Channel) : null;
 
+    /// <summary>Daemon-level info (version, network, block height, wallet state) - the "wavecli getinfo" equivalent.</summary>
+    public Waverpc.DaemonService.DaemonServiceClient? GetDaemonClient(string storeId)
+        => _stores.TryGetValue(storeId, out var sp) ? new Waverpc.DaemonService.DaemonServiceClient(sp.Channel) : null;
+
+    /// <summary>The extra waved flags this store's currently-running instance was actually started with, or null if it isn't running.</summary>
+    public IReadOnlyDictionary<string, string>? GetRunningFlags(string storeId)
+        => _stores.TryGetValue(storeId, out var sp) ? sp.Flags : null;
+
     public IReadOnlyList<string> GetRunningStoreIds()
         => _stores.Where(kv => kv.Value.Process is { HasExited: false }).Select(kv => kv.Key).ToList();
 
@@ -327,9 +335,20 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
                 startInfo.ArgumentList.Add(value);
         }
 
+        // Captured so a startup failure can report *why* waved exited, not just its exit code -
+        // an exit code alone is useless for diagnosing a bad flag/config combination.
+        var startupStderr = new List<string>();
+
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         process.OutputDataReceived += (_, e) => LogOutput(storeId, e.Data, isError: false);
-        process.ErrorDataReceived += (_, e) => LogOutput(storeId, e.Data, isError: true);
+        process.ErrorDataReceived += (_, e) =>
+        {
+            LogOutput(storeId, e.Data, isError: true);
+            if (!string.IsNullOrEmpty(e.Data))
+            {
+                lock (startupStderr) startupStderr.Add(e.Data);
+            }
+        };
 
         if (!process.Start())
             throw new InvalidOperationException($"Failed to start waved for store {storeId}");
@@ -343,7 +362,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         var channel = GrpcChannel.ForAddress(uri, new GrpcChannelOptions { Credentials = ChannelCredentials.Insecure });
         _stores[storeId] = new StoreProcess(process, uri, port, channel, extraFlags);
 
-        await WaitForReadyAsync(storeId, process, _config.Host, port, cancellationToken);
+        await WaitForReadyAsync(storeId, process, _config.Host, port, startupStderr, cancellationToken);
         await EnsureWalletInitializedAsync(storeId, channel, password, cancellationToken);
 
         _logger.LogInformation("Started waved for store {StoreId} on port {Port} with flags: {Flags}", storeId, port,
@@ -387,7 +406,8 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         return path;
     }
 
-    private async Task WaitForReadyAsync(string storeId, Process process, string host, int port, CancellationToken cancellationToken)
+    private async Task WaitForReadyAsync(
+        string storeId, Process process, string host, int port, List<string> startupStderr, CancellationToken cancellationToken)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(30));
@@ -398,8 +418,16 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
             {
                 if (_stores.TryRemove(storeId, out var failed))
                     failed.Channel.Dispose();
+
+                string detail;
+                lock (startupStderr)
+                {
+                    detail = startupStderr.Count > 0
+                        ? string.Join(" | ", startupStderr)
+                        : "(waved printed nothing to stderr - check its stdout in the BTCPay log for [waved:" + storeId + "] lines)";
+                }
                 throw new InvalidOperationException(
-                    $"waved for store {storeId} exited during startup with code {process.ExitCode}");
+                    $"waved for store {storeId} exited during startup with code {process.ExitCode}: {detail}");
             }
             try
             {

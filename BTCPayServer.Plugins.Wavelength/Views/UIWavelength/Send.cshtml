@@ -1,0 +1,63 @@
+@model WavelengthSendViewModel
+@{
+    ViewData.SetLayoutModel(new LayoutModel("Wavelength-Send", StringLocalizer["Send"]).SetCategory("Wavelength"));
+    var hasPreview = !string.IsNullOrEmpty(Model.SendIntentId);
+}
+
+<h2 class="mb-3">@ViewData["Title"]</h2>
+
+@if (!string.IsNullOrEmpty(Model.ErrorMessage))
+{
+    <div class="alert alert-danger">@Model.ErrorMessage</div>
+}
+
+@if (!hasPreview)
+{
+    <form method="post" style="max-width: 400px;">
+        @Html.AntiForgeryToken()
+        <div class="mb-3">
+            <label asp-for="Destination" class="form-label">Lightning invoice</label>
+            <textarea asp-for="Destination" class="form-control" rows="3" placeholder="lnbc..."></textarea>
+        </div>
+        <div class="mb-3">
+            <label asp-for="AmountSat" class="form-label">Amount (only for amountless invoices)</label>
+            <div class="input-group">
+                <input asp-for="AmountSat" type="number" min="1" class="form-control" />
+                <span class="input-group-text">sats</span>
+            </div>
+        </div>
+        <button type="submit" name="command" value="preview" class="btn btn-primary">Preview</button>
+        <a asp-action="Index" asp-route-storeId="@Model.StoreId" class="btn btn-link">Back</a>
+    </form>
+}
+else
+{
+    <div class="widget mb-3" style="max-width: 400px;">
+        <dl class="row mb-0">
+            <dt class="col-5">Destination</dt>
+            <dd class="col-7">@Model.PreviewDestinationSummary</dd>
+            <dt class="col-5">Amount</dt>
+            <dd class="col-7">@Model.PreviewAmountSat?.ToString("N0") sats</dd>
+            <dt class="col-5">Fee</dt>
+            <dd class="col-7">
+                @if (Model.PreviewFeeKnown)
+                {
+                    @($"{Model.PreviewFeeSat:N0} sats")
+                }
+                else
+                {
+                    <span class="text-muted">Not known until send starts</span>
+                }
+            </dd>
+            <dt class="col-5">Rail</dt>
+            <dd class="col-7">@Model.PreviewRail</dd>
+        </dl>
+    </div>
+
+    <form method="post" style="max-width: 400px;">
+        @Html.AntiForgeryToken()
+        <input type="hidden" asp-for="SendIntentId" />
+        <button type="submit" name="command" value="confirm" class="btn btn-primary">Confirm send</button>
+        <a asp-action="Send" asp-route-storeId="@Model.StoreId" class="btn btn-link">Cancel</a>
+    </form>
+}

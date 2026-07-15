@@ -1,0 +1,101 @@
+@model WavelengthWalletViewModel
+@{
+    ViewData.SetLayoutModel(new LayoutModel("Wavelength-Index", StringLocalizer["Wavelength Wallet"]).SetCategory("Wavelength"));
+}
+
+<h2 class="mb-3">@ViewData["Title"]</h2>
+<partial name="_StatusMessage" />
+
+@if (!string.IsNullOrEmpty(Model.StartupError))
+{
+    <div class="alert alert-danger">
+        <strong>waved failed to start:</strong>
+        <pre class="mb-0 mt-1" style="white-space: pre-wrap;">@Model.StartupError</pre>
+    </div>
+}
+else if (!Model.IsRunning)
+{
+    <div class="alert alert-warning">
+        This store's <code>waved</code> instance is not running. It starts automatically the
+        first time it's needed - reload this page, or check
+        <a asp-action="Advanced" asp-route-storeId="@Model.StoreId">Advanced</a> for details if
+        this persists.
+    </div>
+}
+
+@if (Model.IsRunning)
+{
+    <div class="d-flex align-items-center justify-content-between mb-4">
+        <div>
+            <span class="fs-2 fw-bold">@Model.ConfirmedSat.ToString("N0") sats</span>
+            @if (Model.PendingInSat > 0)
+            {
+                <span class="text-muted d-block">+ @Model.PendingInSat.ToString("N0") sats incoming</span>
+            }
+            @if (Model.PendingOutSat > 0)
+            {
+                <span class="text-muted d-block">- @Model.PendingOutSat.ToString("N0") sats outgoing</span>
+            }
+            @if (Model.CreditAvailableSat > 0)
+            {
+                <span class="text-muted d-block">+ @Model.CreditAvailableSat.ToString("N0") sats credit available</span>
+            }
+        </div>
+        <div class="d-flex gap-2">
+            <a asp-action="Receive" asp-route-storeId="@Model.StoreId" class="btn btn-outline-secondary">Receive</a>
+            <a asp-action="Send" asp-route-storeId="@Model.StoreId" class="btn btn-primary">Send</a>
+            <a asp-action="Advanced" asp-route-storeId="@Model.StoreId" class="btn btn-outline-secondary">Advanced</a>
+        </div>
+    </div>
+
+    <div class="widget">
+        <h6 class="mb-3">Activity</h6>
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Type</th>
+                        <th>Counterparty</th>
+                        <th>Status</th>
+                        <th class="text-end">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (Model.Activity.Count == 0)
+                    {
+                        <tr>
+                            <td colspan="5" class="text-center text-muted py-4">No activity yet</td>
+                        </tr>
+                    }
+                    else
+                    {
+                        @foreach (var entry in Model.Activity)
+                        {
+                            <tr>
+                                <td class="text-muted">@entry.UpdatedAt.ToLocalTime().ToString("g")</td>
+                                <td>@entry.Kind</td>
+                                <td>@entry.Counterparty</td>
+                                <td>
+                                    @{
+                                        var badgeClass = entry.Status switch
+                                        {
+                                            "Complete" => "bg-success",
+                                            "Pending" => "bg-info",
+                                            "Failed" => "bg-danger",
+                                            _ => "bg-secondary"
+                                        };
+                                    }
+                                    <span class="badge @badgeClass">@entry.Status</span>
+                                </td>
+                                <td class="text-end fw-semibold @(entry.AmountSat > 0 ? "text-success" : "")">
+                                    @entry.AmountSat.ToString("N0") sats
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}

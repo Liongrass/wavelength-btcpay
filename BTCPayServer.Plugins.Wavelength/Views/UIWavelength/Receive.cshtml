@@ -1,0 +1,50 @@
+@model WavelengthReceiveViewModel
+@{
+    ViewData.SetLayoutModel(new LayoutModel("Wavelength-Receive", StringLocalizer["Receive"]).SetCategory("Wavelength"));
+}
+
+<h2 class="mb-3">@ViewData["Title"]</h2>
+
+@if (!string.IsNullOrEmpty(Model.ErrorMessage))
+{
+    <div class="alert alert-danger">@Model.ErrorMessage</div>
+}
+
+<form method="post" class="mb-4" style="max-width: 400px;">
+    @Html.AntiForgeryToken()
+    <div class="mb-3">
+        <label asp-for="AmountSat" class="form-label">Amount</label>
+        <div class="input-group">
+            <input asp-for="AmountSat" type="number" min="1" class="form-control" />
+            <span class="input-group-text">sats</span>
+        </div>
+    </div>
+    <div class="mb-3">
+        <label asp-for="Memo" class="form-label">Memo (optional)</label>
+        <input asp-for="Memo" class="form-control" maxlength="200" />
+    </div>
+    <button type="submit" class="btn btn-primary">Create invoice</button>
+    <a asp-action="Index" asp-route-storeId="@Model.StoreId" class="btn btn-link">Back</a>
+</form>
+
+@if (!string.IsNullOrEmpty(Model.Invoice))
+{
+    <div class="widget" style="max-width: 400px;">
+        <div class="text-center p-3 bg-white rounded mb-3">
+            <div id="receive-qr"></div>
+        </div>
+        <label class="form-label text-muted text-uppercase small">Invoice</label>
+        <vc:truncate-center text="@Model.Invoice" padding="15" elastic="true" classes="form-control-plaintext w-100" />
+    </div>
+
+    <script src="~/js/qrcode.js" asp-append-version="true"></script>
+    <script>
+        new QRCode(document.getElementById("receive-qr"), {
+            text: @Safe.Json(Model.Invoice),
+            width: 256,
+            height: 256,
+            useSVG: true,
+            correctLevel: QRCode.CorrectLevel.M
+        });
+    </script>
+}
