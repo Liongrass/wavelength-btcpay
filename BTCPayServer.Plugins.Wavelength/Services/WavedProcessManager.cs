@@ -4,8 +4,6 @@ using System.Net.Sockets;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using BTCPayServer.Events;
-using BTCPayServer.Plugins.Wavelength.Notifications;
-using BTCPayServer.Services.Notifications;
 using BTCPayServer.Services.Stores;
 using Google.Protobuf;
 using Grpc.Core;
@@ -42,7 +40,6 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     private readonly EventAggregator _eventAggregator;
     private readonly WavedWalletCredentialStore _credentialStore;
     private readonly WavedMnemonicOnceCache _mnemonicCache;
-    private readonly NotificationSender _notificationSender;
     private readonly ILogger<WavedProcessManager> _logger;
     private readonly string _nativeDir;
 
@@ -59,7 +56,6 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         EventAggregator eventAggregator,
         WavedWalletCredentialStore credentialStore,
         WavedMnemonicOnceCache mnemonicCache,
-        NotificationSender notificationSender,
         ILogger<WavedProcessManager> logger)
     {
         _config = config;
@@ -67,7 +63,6 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         _eventAggregator = eventAggregator;
         _credentialStore = credentialStore;
         _mnemonicCache = mnemonicCache;
-        _notificationSender = notificationSender;
         _logger = logger;
         _nextPort = config.BasePort;
 
@@ -472,12 +467,9 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
 
             // The mnemonic is never persisted anywhere - held in memory only until the store
             // owner views it once (see WavedMnemonicOnceCache) or the process restarts, whichever
-            // is first. The caller is expected to show it immediately too; this is a fallback in
-            // case that response never renders (tab closed mid-request, connection drop, etc).
+            // is first. This cache entry is also the hand-off from CreateWallet's POST action to
+            // the Mnemonic GET action it redirects to - there is no other copy of this value.
             _mnemonicCache.Store(storeId, string.Join(' ', mnemonic));
-            await _notificationSender.SendNotification(
-                new StoreScope(storeId),
-                new WavelengthWalletCreatedNotification { StoreId = storeId });
 
             return mnemonic;
         }

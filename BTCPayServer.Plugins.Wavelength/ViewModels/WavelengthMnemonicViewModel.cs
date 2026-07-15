@@ -7,5 +7,6 @@ namespace BTCPayServer.Plugins.Wavelength.ViewModels;
 // to hit by accident again, here or anywhere else this pattern gets copied.
 public sealed class WavelengthMnemonicViewModel
 {
+    public string StoreId { get; set; } = "";
     public string? Mnemonic { get; set; }
 }

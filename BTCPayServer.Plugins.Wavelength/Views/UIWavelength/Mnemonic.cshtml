@@ -2,6 +2,7 @@
 @model WavelengthMnemonicViewModel
 @{
     ViewData.SetLayoutModel(new LayoutModel("Wavelength-Mnemonic", StringLocalizer["Wallet Recovery Phrase"]).SetCategory("Wavelength"));
+    var words = Model.Mnemonic?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [];
 }
 
 <h2>Wallet Recovery Phrase</h2>
@@ -13,13 +14,32 @@
         is not stored anywhere - it cannot be shown again. If you did not record it, the wallet's
         on-disk data is still the only copy that exists.
     </div>
+    <a asp-action="Index" asp-route-storeId="@Model.StoreId">Back to Wavelength</a>
 }
 else
 {
     <div class="alert alert-danger">
-        <strong>Write this down now and store it offline.</strong> This is the only time it will
-        ever be shown - it is not saved anywhere by BTCPay or Wavelength. Anyone with these words
-        can spend this store's funds.
+        Below is your wallet's seed phrase. It can be used to recover your funds in case of a
+        fatal error. The seed can only be shown once - we recommend you write it down by hand on
+        a piece of paper.
     </div>
-    <pre class="p-3 bg-light border rounded"><code>@Model.Mnemonic</code></pre>
+
+    <div class="widget mb-4" style="max-width: 640px;">
+        <div class="row text-center gy-2">
+            @for (var col = 0; col < 4; col++)
+            {
+                <div class="col-3">
+                    @for (var i = col * 6; i < col * 6 + 6 && i < words.Length; i++)
+                    {
+                        <div class="mb-2">
+                            <span class="text-muted">@(i + 1).</span>
+                            <strong>@words[i]</strong>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    <a asp-action="Index" asp-route-storeId="@Model.StoreId" class="btn btn-primary">I wrote it down.</a>
 }

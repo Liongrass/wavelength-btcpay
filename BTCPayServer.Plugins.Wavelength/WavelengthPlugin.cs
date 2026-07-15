@@ -2,9 +2,7 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Lightning;
 using BTCPayServer.Plugins.Wavelength.Lightning;
-using BTCPayServer.Plugins.Wavelength.Notifications;
 using BTCPayServer.Plugins.Wavelength.Services;
-using BTCPayServer.Services.Notifications;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace BTCPayServer.Plugins.Wavelength;
@@ -35,7 +33,6 @@ public class WavelengthPlugin : BaseBTCPayServerPlugin
         services.AddHostedService(sp => sp.GetRequiredService<WavedProcessManager>());
 
         services.AddSingleton<ILightningConnectionStringHandler, WavelengthLightningConnectionStringHandler>();
-        services.AddSingleton<INotificationHandler, WavelengthWalletCreatedNotification.Handler>();
 
         services.AddUIExtension("ln-payment-method-setup-tab", "/Views/Lightning/LNPaymentMethodSetupTab.cshtml");
         services.AddUIExtension("store-wallets-nav", "Wavelength/NavExtension");

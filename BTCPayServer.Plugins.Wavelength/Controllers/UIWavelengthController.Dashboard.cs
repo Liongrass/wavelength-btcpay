@@ -93,10 +93,9 @@ public partial class UIWavelengthController
             return RedirectToAction(nameof(Index), new { storeId });
         }
 
-        // Mnemonic redirects here and shows it via WavedMnemonicOnceCache.TakeOnce - this is the
-        // primary, reliable path now (the user is already looking at the page that triggered
-        // creation); the notification CreateWalletAsync also sends is only a fallback in case
-        // this response never renders.
+        // The Mnemonic action reads the same WavedMnemonicOnceCache entry CreateWalletAsync just
+        // wrote and shows it via TakeOnce - there is no notification fallback; this redirect is
+        // the only place the mnemonic is ever shown.
         return RedirectToAction(nameof(Mnemonic), new { storeId });
     }
 

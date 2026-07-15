@@ -71,13 +71,13 @@ public partial class UIWavelengthController(
         return null;
     }
 
-    // Deliberately a GET, not a POST: the notification's ActionLink navigates here directly.
-    // TakeOnce still only ever succeeds once - a second visit (refresh, back button, someone
-    // else clicking an old link) finds nothing left to show.
+    // Deliberately a GET, not a POST: CreateWallet redirects here (a redirect is always a GET),
+    // and TakeOnce only ever succeeds once regardless - a second visit (refresh, back button)
+    // finds nothing left to show.
     [HttpGet("mnemonic")]
     public IActionResult Mnemonic(string storeId)
     {
         var mnemonic = mnemonicCache.TakeOnce(storeId);
-        return View(new WavelengthMnemonicViewModel { Mnemonic = mnemonic });
+        return View(new WavelengthMnemonicViewModel { StoreId = storeId, Mnemonic = mnemonic });
     }
 }
