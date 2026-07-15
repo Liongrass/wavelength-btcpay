@@ -365,7 +365,23 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         _stores[storeId] = new StoreProcess(process, uri, port, channel, extraFlags);
 
         await WaitForReadyAsync(storeId, process, _config.Host, port, startupStderr, cancellationToken);
-        await EnsureWalletInitializedAsync(storeId, channel, password, cancellationToken);
+
+        try
+        {
+            await EnsureWalletInitializedAsync(storeId, channel, password);
+        }
+        catch
+        {
+            // _stores[storeId] was set above so WaitForReadyAsync could observe the process -
+            // if wallet init then fails, IsRunning(storeId) would otherwise stay true forever,
+            // and every future EnsureStartedAsync call would just no-op instead of retrying
+            // Create. Tear the half-started process down so the next call gets a clean retry.
+            _stores.TryRemove(storeId, out _);
+            channel.Dispose();
+            await TerminateProcessAsync(process);
+            process.Dispose();
+            throw;
+        }
 
         _logger.LogInformation("Started waved for store {StoreId} on port {Port} with flags: {Flags}", storeId, port,
             string.Join(' ', flags.Select(kv => kv.Value is null ? $"--{kv.Key}" : $"--{kv.Key}={kv.Value}")));
@@ -377,11 +393,17 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     /// at process start above) has already taken care of it by the time we get here - Status
     /// reports Unlocked=true and there's nothing left to do.
     /// </summary>
-    private async Task EnsureWalletInitializedAsync(
-        string storeId, GrpcChannel channel, string password, CancellationToken cancellationToken)
+    private async Task EnsureWalletInitializedAsync(string storeId, GrpcChannel channel, string password)
     {
+        // Deliberately not the caller's token: EnsureStartedAsync is often invoked from an HTTP
+        // request (a dashboard page load), and Create must not be aborted just because that
+        // request's lifetime ends first (browser closed, reverse-proxy timeout, etc.) - a
+        // half-created wallet is worse than a slightly slow page load. Bounded by its own
+        // timeout instead, matching WaitForReadyAsync's pattern.
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
         var wallet = new WalletServiceClient(channel);
-        var status = await wallet.StatusAsync(new StatusRequest(), cancellationToken: cancellationToken);
+        var status = await wallet.StatusAsync(new StatusRequest(), cancellationToken: cts.Token);
         if (status.Unlocked)
             return;
 
@@ -389,7 +411,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         var response = await wallet.CreateAsync(new CreateRequest
         {
             WalletPassword = ByteString.CopyFromUtf8(password)
-        }, cancellationToken: cancellationToken);
+        }, cancellationToken: cts.Token);
 
         // The mnemonic is never persisted anywhere - held in memory only until the store owner
         // views it once (see WavedMnemonicOnceCache) or the process restarts, whichever is first.
