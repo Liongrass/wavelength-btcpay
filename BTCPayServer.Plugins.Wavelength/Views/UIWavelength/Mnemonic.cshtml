@@ -1,12 +1,12 @@
 @using BTCPayServer.Abstractions.Models
-@model string
+@model WavelengthMnemonicViewModel
 @{
     ViewData.SetLayoutModel(new LayoutModel("Wavelength-Mnemonic", StringLocalizer["Wallet Recovery Phrase"]).SetCategory("Wavelength"));
 }
 
 <h2>Wallet Recovery Phrase</h2>
 
-@if (Model is null)
+@if (Model.Mnemonic is null)
 {
     <div class="alert alert-warning">
         This recovery phrase has already been viewed (or was never generated for this store) and
@@ -21,5 +21,5 @@ else
         ever be shown - it is not saved anywhere by BTCPay or Wavelength. Anyone with these words
         can spend this store's funds.
     </div>
-    <pre class="p-3 bg-light border rounded"><code>@Model</code></pre>
+    <pre class="p-3 bg-light border rounded"><code>@Model.Mnemonic</code></pre>
 }

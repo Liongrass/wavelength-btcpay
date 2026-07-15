@@ -5,6 +5,7 @@ using BTCPayServer.Data;
 using BTCPayServer.Payments;
 using BTCPayServer.Payments.Lightning;
 using BTCPayServer.Plugins.Wavelength.Services;
+using BTCPayServer.Plugins.Wavelength.ViewModels;
 using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
 using Grpc.Core;
@@ -77,6 +78,6 @@ public partial class UIWavelengthController(
     public IActionResult Mnemonic(string storeId)
     {
         var mnemonic = mnemonicCache.TakeOnce(storeId);
-        return View(mnemonic);
+        return View(new WavelengthMnemonicViewModel { Mnemonic = mnemonic });
     }
 }
