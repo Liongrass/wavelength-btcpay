@@ -1,0 +1,25 @@
+@using BTCPayServer.Abstractions.Models
+@model string
+@{
+    ViewData.SetLayoutModel(new LayoutModel("Wavelength-Mnemonic", StringLocalizer["Wallet Recovery Phrase"]).SetCategory("Wavelength"));
+}
+
+<h2>Wallet Recovery Phrase</h2>
+
+@if (Model is null)
+{
+    <div class="alert alert-warning">
+        This recovery phrase has already been viewed (or was never generated for this store) and
+        is not stored anywhere - it cannot be shown again. If you did not record it, the wallet's
+        on-disk data is still the only copy that exists.
+    </div>
+}
+else
+{
+    <div class="alert alert-danger">
+        <strong>Write this down now and store it offline.</strong> This is the only time it will
+        ever be shown - it is not saved anywhere by BTCPay or Wavelength. Anyone with these words
+        can spend this store's funds.
+    </div>
+    <pre class="p-3 bg-light border rounded"><code>@Model</code></pre>
+}

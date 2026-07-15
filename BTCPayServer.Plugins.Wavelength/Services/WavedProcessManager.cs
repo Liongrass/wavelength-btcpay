@@ -4,11 +4,15 @@ using System.Net.Sockets;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using BTCPayServer.Events;
+using BTCPayServer.Plugins.Wavelength.Notifications;
+using BTCPayServer.Services.Notifications;
 using BTCPayServer.Services.Stores;
+using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Wavewalletrpc;
 using WalletInspectionServiceClient = Wavewalletrpc.WalletInspectionService.WalletInspectionServiceClient;
 using WalletServiceClient = Wavewalletrpc.WalletService.WalletServiceClient;
 
@@ -32,6 +36,9 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     private readonly WavedConfiguration _config;
     private readonly StoreRepository _storeRepository;
     private readonly EventAggregator _eventAggregator;
+    private readonly WavedWalletCredentialStore _credentialStore;
+    private readonly WavedMnemonicOnceCache _mnemonicCache;
+    private readonly NotificationSender _notificationSender;
     private readonly ILogger<WavedProcessManager> _logger;
     private readonly string _nativeDir;
 
@@ -46,11 +53,17 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         WavedConfiguration config,
         StoreRepository storeRepository,
         EventAggregator eventAggregator,
+        WavedWalletCredentialStore credentialStore,
+        WavedMnemonicOnceCache mnemonicCache,
+        NotificationSender notificationSender,
         ILogger<WavedProcessManager> logger)
     {
         _config = config;
         _storeRepository = storeRepository;
         _eventAggregator = eventAggregator;
+        _credentialStore = credentialStore;
+        _mnemonicCache = mnemonicCache;
+        _notificationSender = notificationSender;
         _logger = logger;
         _nextPort = config.BasePort;
 
@@ -217,6 +230,13 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         var dataDir = _config.GetStoreDataDir(storeId);
         Directory.CreateDirectory(dataDir);
 
+        // Written unconditionally, even for a brand-new store with no wallet yet: waved simply
+        // ignores it when there's nothing to auto-unlock (see waved/server.go's "no wallet
+        // found, awaiting InitWallet RPC" path). We still need the same password in hand below
+        // to actually call Create on first boot.
+        var password = await _credentialStore.GetOrCreatePasswordAsync(storeId, cancellationToken);
+        var passwordFilePath = WritePasswordFile(dataDir, password);
+
         var port = Interlocked.Increment(ref _nextPort) - 1;
         var uri = new Uri($"http://{_config.Host}:{port}");
         var wavedPath = ResolveBinaryPath("waved");
@@ -235,6 +255,8 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         startInfo.ArgumentList.Add(_config.Network);
         startInfo.ArgumentList.Add("--rpc.listenaddr");
         startInfo.ArgumentList.Add($"{_config.Host}:{port}");
+        startInfo.ArgumentList.Add("--wallet.password_file");
+        startInfo.ArgumentList.Add(passwordFilePath);
         // waved is only ever bound to loopback and only ever talked to by this plugin, so
         // plaintext RPC is acceptable here - a macaroon can't ride an unencrypted connection,
         // so these two flags must be passed together (see wavelength's INSTALL.md).
@@ -258,12 +280,46 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         _stores[storeId] = new StoreProcess(process, uri, port, channel);
 
         await WaitForReadyAsync(storeId, process, _config.Host, port, cancellationToken);
+        await EnsureWalletInitializedAsync(storeId, channel, password, cancellationToken);
 
-        // TODO: once the wavewalletrpc gRPC client is vendored (see proto sync plan), call the
-        // WalletService.Create RPC here on first start instead of just waiting for the port to
-        // open - waved exposes wallet creation over RPC directly, no separate CLI step needed
-        // (unlike bark, which shells out to a separate `bark create` binary).
         _logger.LogInformation("Started waved for store {StoreId} on port {Port}", storeId, port);
+    }
+
+    /// <summary>
+    /// Bootstraps a brand-new store's wallet via WalletService.Create on first boot. For a store
+    /// that already has a wallet on disk, waved's own --wallet.password_file auto-unlock (passed
+    /// at process start above) has already taken care of it by the time we get here - Status
+    /// reports Unlocked=true and there's nothing left to do.
+    /// </summary>
+    private async Task EnsureWalletInitializedAsync(
+        string storeId, GrpcChannel channel, string password, CancellationToken cancellationToken)
+    {
+        var wallet = new WalletServiceClient(channel);
+        var status = await wallet.StatusAsync(new StatusRequest(), cancellationToken: cancellationToken);
+        if (status.Unlocked)
+            return;
+
+        _logger.LogInformation("No wallet found for store {StoreId}, creating one", storeId);
+        var response = await wallet.CreateAsync(new CreateRequest
+        {
+            WalletPassword = ByteString.CopyFromUtf8(password)
+        }, cancellationToken: cancellationToken);
+
+        // The mnemonic is never persisted anywhere - held in memory only until the store owner
+        // views it once (see WavedMnemonicOnceCache) or the process restarts, whichever is first.
+        _mnemonicCache.Store(storeId, string.Join(' ', response.Mnemonic));
+        await _notificationSender.SendNotification(
+            new StoreScope(storeId),
+            new WavelengthWalletCreatedNotification { StoreId = storeId });
+    }
+
+    private static string WritePasswordFile(string dataDir, string password)
+    {
+        var path = Path.Combine(dataDir, "wallet_password");
+        File.WriteAllText(path, password);
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        return path;
     }
 
     private async Task WaitForReadyAsync(string storeId, Process process, string host, int port, CancellationToken cancellationToken)

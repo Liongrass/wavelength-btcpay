@@ -95,6 +95,10 @@ wavelength-data/
 # Build artifacts - plugin deployment directory
 plugins/
 
+# scripts/build-plugin.sh output
+/build/
+/packaged/
+
 # Native waved/wavecli binaries (fetched at publish time or placed manually for dev)
 BTCPayServer.Plugins.Wavelength/Native/**/*
 !BTCPayServer.Plugins.Wavelength/Native/**/.gitkeep
