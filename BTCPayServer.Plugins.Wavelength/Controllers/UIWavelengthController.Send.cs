@@ -3,6 +3,7 @@ using BTCPayServer.Plugins.Wavelength.ViewModels;
 using Grpc.Core;
 using Microsoft.AspNetCore.Mvc;
 using Wavewalletrpc;
+using WalletServiceClient = Wavewalletrpc.WalletService.WalletServiceClient;
 
 namespace BTCPayServer.Plugins.Wavelength.Controllers;
 
