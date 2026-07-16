@@ -454,10 +454,19 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     {
         lock (_portLock)
         {
+            _logger.LogInformation(
+                "Reserving a port starting from {BasePort} - currently reserved: {ReservedPorts}",
+                _config.BasePort, string.Join(',', _reservedPorts.OrderBy(p => p)));
+
             for (var port = _config.BasePort; port < _config.BasePort + 10_000; port++)
             {
                 if (_reservedPorts.Contains(port))
+                {
+                    _logger.LogInformation(
+                        "Port {Port} is already reserved by our own bookkeeping - trying the next one",
+                        port);
                     continue;
+                }
 
                 try
                 {
@@ -466,7 +475,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
                 }
                 catch (SocketException)
                 {
-                    _logger.LogDebug(
+                    _logger.LogInformation(
                         "Port {Port} is already bound by something outside our own tracking " +
                         "(possibly an orphaned waved instance from before a restart) - trying the next one",
                         port);
