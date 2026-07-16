@@ -56,9 +56,10 @@
                     same way - e.g. <code>network</code>, <code>wallet.esploraurl</code>, <code>server.host</code>.
                     They're passed straight through as <code>--flag value</code> on this store's <code>waved</code>
                     process. A handful of flags (<code>datadir</code>, <code>rpc.listenaddr</code>,
-                    <code>wallet.password_file</code>, <code>rpc.notls</code>, <code>rpc.no-macaroons</code>) are managed
-                    by the plugin and cannot be overridden here. Changing flags on an already-running store takes
-                    effect on its next restart, not immediately.
+                    <code>wallet.password_file</code>, <code>rpc.notls</code>, <code>rpc.no-macaroons</code>,
+                    <code>rpc.gateway.enabled</code>, <code>rpc.gateway.listenaddr</code>) are managed by the plugin
+                    and cannot be overridden here. Changing flags on an already-running store takes effect on its
+                    next restart, not immediately.
                 </p>
                 <!-- TODO: link to a Wavelength settings/setup page once one exists, mirroring
                      bark-btcpay's "Bark settings" link, so users can initialize/back up the

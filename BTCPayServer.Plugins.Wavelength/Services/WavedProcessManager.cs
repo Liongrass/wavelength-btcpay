@@ -385,6 +385,11 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
                 if (value is not null)
                     startInfo.ArgumentList.Add(value);
             }
+            // Must be a single --flag=false argument, not two separate ones ("--flag" "false") -
+            // pflag/cobra bool flags don't consume the next argument as their value; --flag alone
+            // sets it true, and only the combined --flag=false form explicitly negates a
+            // default-true flag like this one. See WavedReservedFlags for why it's disabled.
+            startInfo.ArgumentList.Add("--rpc.gateway.enabled=false");
 
             // Captured so a startup failure can report *why* waved exited, not just its exit code
             // - an exit code alone is useless for diagnosing a bad flag/config combination.
@@ -412,7 +417,8 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
             // the port is accepting connections.
             var channel = GrpcChannel.ForAddress(uri, new GrpcChannelOptions { Credentials = ChannelCredentials.Insecure });
             _stores[storeId] = new StoreProcess(process, uri, port, channel, extraFlags);
-            flagsLog = string.Join(' ', flags.Select(kv => kv.Value is null ? $"--{kv.Key}" : $"--{kv.Key}={kv.Value}"));
+            flagsLog = string.Join(' ', flags.Select(kv => kv.Value is null ? $"--{kv.Key}" : $"--{kv.Key}={kv.Value}"))
+                + " --rpc.gateway.enabled=false";
         }
         catch
         {

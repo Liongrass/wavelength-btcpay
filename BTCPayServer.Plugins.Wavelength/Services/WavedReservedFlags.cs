@@ -28,5 +28,13 @@ public static class WavedReservedFlags
         // mapstructure tags) - not the --no-tls/--no-macaroons shorthand INSTALL.md's prose uses.
         "rpc.notls",
         "rpc.no-macaroons",
+
+        // The HTTP/JSON gateway is a second listener entirely separate from rpc.listenaddr's
+        // gRPC one, and defaults to a FIXED port (localhost:10031) no matter what rpc.listenaddr
+        // is set to - every store's waved instance would collide on it otherwise. This plugin
+        // only ever talks to waved over gRPC, so the gateway is disabled outright rather than
+        // also allocating and tracking a second port per store.
+        "rpc.gateway.enabled",
+        "rpc.gateway.listenaddr",
     };
 }
