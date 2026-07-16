@@ -90,15 +90,17 @@ else if (!Model.IsRunning)
                         <th>Date</th>
                         <th>Type</th>
                         <th>Counterparty</th>
+                        <th>Note</th>
                         <th>Status</th>
                         <th class="text-end">Amount</th>
+                        <th>ID</th>
                     </tr>
                 </thead>
                 <tbody>
                     @if (Model.Activity.Count == 0)
                     {
                         <tr>
-                            <td colspan="5" class="text-center text-muted py-4">No activity yet</td>
+                            <td colspan="7" class="text-center text-muted py-4">No activity yet</td>
                         </tr>
                     }
                     else
@@ -109,6 +111,7 @@ else if (!Model.IsRunning)
                                 <td class="text-muted">@entry.UpdatedAt.ToLocalTime().ToString("g")</td>
                                 <td>@entry.Kind</td>
                                 <td>@entry.Counterparty</td>
+                                <td class="text-muted">@entry.Note</td>
                                 <td>
                                     @{
                                         var badgeClass = entry.Status switch
@@ -123,6 +126,12 @@ else if (!Model.IsRunning)
                                 </td>
                                 <td class="text-end fw-semibold @(entry.AmountSat > 0 ? "text-success" : "")">
                                     @entry.AmountSat.ToString("N0") sats
+                                </td>
+                                <td>
+                                    <span class="text-muted">@(entry.Id.Length > 6 ? entry.Id[..6] : entry.Id)</span>
+                                    <button type="button" class="btn btn-link p-0 clipboard-button" data-clipboard="@entry.Id" title="Copy ID">
+                                        <vc:icon symbol="actions-copy" />
+                                    </button>
                                 </td>
                             </tr>
                         }
