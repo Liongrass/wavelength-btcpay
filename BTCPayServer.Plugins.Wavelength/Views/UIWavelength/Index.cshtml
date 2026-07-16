@@ -58,8 +58,8 @@ else if (!Model.IsRunning)
             }
         </div>
         <div class="d-flex gap-2">
-            <a asp-action="Receive" asp-route-storeId="@Model.StoreId" class="btn btn-outline-secondary">Receive</a>
             <a asp-action="Send" asp-route-storeId="@Model.StoreId" class="btn btn-primary">Send</a>
+            <a asp-action="Receive" asp-route-storeId="@Model.StoreId" class="btn btn-outline-secondary">Receive</a>
             <a asp-action="Advanced" asp-route-storeId="@Model.StoreId" class="btn btn-outline-secondary">Advanced</a>
         </div>
     </div>
