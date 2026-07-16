@@ -89,7 +89,6 @@ else if (!Model.IsRunning)
                     <tr>
                         <th>Date</th>
                         <th>Type</th>
-                        <th>Counterparty</th>
                         <th>Note</th>
                         <th>Status</th>
                         <th class="text-end">Amount</th>
@@ -100,7 +99,7 @@ else if (!Model.IsRunning)
                     @if (Model.Activity.Count == 0)
                     {
                         <tr>
-                            <td colspan="7" class="text-center text-muted py-4">No activity yet</td>
+                            <td colspan="6" class="text-center text-muted py-4">No activity yet</td>
                         </tr>
                     }
                     else
@@ -110,7 +109,6 @@ else if (!Model.IsRunning)
                             <tr>
                                 <td class="text-muted">@entry.UpdatedAt.ToLocalTime().ToString("g")</td>
                                 <td>@entry.Kind</td>
-                                <td>@entry.Counterparty</td>
                                 <td class="text-muted">@entry.Note</td>
                                 <td>
                                     @{
