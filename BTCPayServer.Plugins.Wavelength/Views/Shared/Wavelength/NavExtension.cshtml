@@ -1,8 +1,23 @@
 @using BTCPayServer
+@using BTCPayServer.Data
+@using BTCPayServer.Payments
+@using BTCPayServer.Payments.Lightning
 @model BTCPayServer.Components.MainNav.MainNavViewModel
+@inject BTCPayServer.Plugins.Wavelength.Services.WavedProcessManager ProcessManager
+@inject BTCPayServer.Services.Invoices.PaymentMethodHandlerDictionary Handlers
 
 @{
     var store = Context.GetStoreData();
+
+    // Cheap, RPC-free signals only - this partial renders on every page for the store, so a
+    // live Status/Balance check here would add latency to every single page load. No "error"
+    // state for the same reason: a real error can only be known from a live check, and showing
+    // a guessed-at red dot would be worse than not showing one.
+    var lnId = PaymentTypes.LN.GetPaymentMethodId("BTC");
+    var isWavelength = store?.GetPaymentMethodConfig<LightningPaymentMethodConfig>(lnId, Handlers)
+        ?.ConnectionString?.StartsWith("type=wavelength", StringComparison.OrdinalIgnoreCase) == true;
+    var isRunning = store != null && ProcessManager.IsRunning(store.Id);
+    var status = isWavelength && isRunning ? "enabled" : "pending";
 }
 
 @if (store != null)
@@ -12,6 +27,8 @@
            asp-controller="UIWavelength" asp-action="Index"
            asp-route-storeId="@store.Id"
            id="StoreNav-Wavelength">
+            <span class="me-2">〰️</span>
+            <span class="me-2 btcpay-status btcpay-status--@status"></span>
             <span>Wavelength</span>
         </a>
     </li>
