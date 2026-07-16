@@ -21,18 +21,24 @@
     <div class="accordion-item">
         <h2 class="accordion-header" id="CustomWavelengthHeader">
             <button type="button" class="accordion-button collapsed" data-bs-toggle="collapse" data-bs-target="#CustomWavelengthContent" aria-controls="CustomWavelengthContent" aria-expanded="false">
-                <span><strong>Wavelength</strong> - Ark + Lightning</span>
+                <span><strong>Wavelength</strong> <code>waved</code></span>
                 <vc:icon symbol="caret-down"/>
             </button>
         </h2>
         <div id="CustomWavelengthContent" class="accordion-collapse collapse" aria-labelledby="CustomWavelengthHeader" data-bs-parent="#CustomNodeSupport">
             <div class="accordion-body">
                 <ul class="pb-2">
-                    <li>
+                    <li class="mb-2">
+                        <div class="text-muted small">Wallet: Lightweight</div>
                         <code><b>type=</b>wavelength;<b>store-id=</b>@storeId</code>
                     </li>
-                    <li>
-                        <code><b>type=</b>wavelength;<b>store-id=</b>@storeId;<b>network=</b>regtest</code>
+                    <li class="mb-2">
+                        <div class="text-muted small">Wallet: Lightweight (signet)</div>
+                        <code><b>type=</b>wavelength;<b>store-id=</b>@storeId;<b>network=</b>signet</code>
+                    </li>
+                    <li class="mb-2">
+                        <div class="text-muted small">Wallet: Neutrino</div>
+                        <code><b>type=</b>wavelength;<b>store-id=</b>@storeId;<b>wallet.type=</b>btcwallet</code>
                     </li>
                 </ul>
                 <p class="my-2">
