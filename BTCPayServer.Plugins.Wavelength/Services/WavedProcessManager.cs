@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -49,7 +50,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     private readonly object _creationLock = new();
     private readonly ConcurrentQueue<string> _removedStoreIds = new();
     private IEventAggregatorSubscription? _storeRemovedSub;
-    private int _nextPort;
+    private readonly object _portLock = new();
     private bool _disposed;
 
     public WavedProcessManager(
@@ -66,7 +67,6 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         _credentialStore = credentialStore;
         _mnemonicCache = mnemonicCache;
         _logger = logger;
-        _nextPort = config.BasePort;
 
         var assemblyDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
             ?? throw new InvalidOperationException("Cannot determine assembly location");
@@ -289,6 +289,14 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
                         "waved for store {StoreId} exited unexpectedly with code {ExitCode}, restarting",
                         storeId, sp.Process.ExitCode);
                     sp.Process.Dispose();
+                    // Disposing the channel matters beyond cleanup: it's a plaintext, unauthenticated
+                    // loopback gRPC channel (rpc.notls/rpc.no-macaroons) tied only to an IP:port, with
+                    // nothing to verify the process on the other end is still this store's waved
+                    // instance. If a stale reference to this channel outlived the crash and its port
+                    // gets reused by a different store before we get here, an un-disposed channel
+                    // would happily reconnect and silently talk to the wrong store's wallet. Disposing
+                    // it now makes any such stale reference fail fast instead.
+                    sp.Channel.Dispose();
                     _stores.TryRemove(storeId, out _);
 
                     try
@@ -327,7 +335,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         var password = await _credentialStore.GetOrCreatePasswordAsync(storeId, cancellationToken);
         var passwordFilePath = WritePasswordFile(dataDir, password);
 
-        var port = Interlocked.Increment(ref _nextPort) - 1;
+        var port = ReserveFreePort();
         var uri = new Uri($"http://{_config.Host}:{port}");
         var wavedPath = ResolveBinaryPath("waved");
 
@@ -401,6 +409,46 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
 
         _logger.LogInformation("Started waved for store {StoreId} on port {Port} with flags: {Flags}", storeId, port,
             string.Join(' ', flags.Select(kv => kv.Value is null ? $"--{kv.Key}" : $"--{kv.Key}={kv.Value}")));
+    }
+
+    /// <summary>
+    /// Picks a port for a new waved instance by actually probing it, rather than handing out the
+    /// next number from a simple counter. A counter resets to BasePort every time
+    /// WavedProcessManager is constructed (i.e. every BTCPay restart), but a waved process that
+    /// was never cleanly killed - e.g. an ungraceful shutdown that didn't give TerminateProcessAsync
+    /// a chance to run - keeps its old port bound indefinitely. Reusing that same port for a
+    /// different store on the next restart produces exactly the "address already in use" error
+    /// this fixes. Also checked against ports already claimed by stores this instance has itself
+    /// started, since two stores' first-ever start can race concurrently.
+    /// </summary>
+    private int ReserveFreePort()
+    {
+        lock (_portLock)
+        {
+            var claimed = _stores.Values.Select(sp => sp.Port).ToHashSet();
+            for (var port = _config.BasePort; port < _config.BasePort + 10_000; port++)
+            {
+                if (claimed.Contains(port))
+                    continue;
+
+                try
+                {
+                    using var probe = new TcpListener(IPAddress.Parse(_config.Host), port);
+                    probe.Start();
+                    return port;
+                }
+                catch (SocketException)
+                {
+                    _logger.LogDebug(
+                        "Port {Port} is already bound by something outside our own tracking " +
+                        "(possibly an orphaned waved instance from before a restart) - trying the next one",
+                        port);
+                }
+            }
+
+            throw new InvalidOperationException(
+                $"No free port found in range {_config.BasePort}-{_config.BasePort + 10_000} for a new waved instance");
+        }
     }
 
     /// <summary>
