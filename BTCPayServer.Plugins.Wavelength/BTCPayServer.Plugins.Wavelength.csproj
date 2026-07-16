@@ -57,7 +57,7 @@
   <!-- Include native waved/wavecli binaries in build output, once present -->
   <ItemGroup>
     <None Include="Native\**\*" Condition="Exists('Native')">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       <Link>Native\%(RecursiveDir)%(Filename)%(Extension)</Link>
     </None>
   </ItemGroup>
