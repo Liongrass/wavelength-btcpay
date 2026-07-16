@@ -51,6 +51,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     private readonly ConcurrentQueue<string> _removedStoreIds = new();
     private IEventAggregatorSubscription? _storeRemovedSub;
     private readonly object _portLock = new();
+    private readonly HashSet<int> _reservedPorts = new();
     private bool _disposed;
 
     public WavedProcessManager(
@@ -186,6 +187,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         await TerminateProcessAsync(sp.Process);
         sp.Channel.Dispose();
         sp.Process.Dispose();
+        ReleasePort(sp.Port);
         _logger.LogInformation("Stopped waved for store {StoreId}", storeId);
     }
 
@@ -298,6 +300,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
                     // it now makes any such stale reference fail fast instead.
                     sp.Channel.Dispose();
                     _stores.TryRemove(storeId, out _);
+                    ReleasePort(sp.Port);
 
                     try
                     {
@@ -339,71 +342,85 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         var uri = new Uri($"http://{_config.Host}:{port}");
         var wavedPath = ResolveBinaryPath("waved");
 
-        // Server-wide default first, then whatever the store's connection string actually asked
-        // for (skipping anything WavedReservedFlags owns - the connection string handler already
-        // rejects those at Create() time, this is defense in depth), then the plugin-owned flags
-        // always win regardless of what's upstream of them.
-        var flags = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        Process process;
+        List<string> startupStderr;
+        try
         {
-            ["network"] = _config.Network,
-        };
-        foreach (var (key, value) in extraFlags)
-        {
-            if (!WavedReservedFlags.Keys.Contains(key))
-                flags[key] = value;
-        }
-        flags["datadir"] = dataDir;
-        flags["rpc.listenaddr"] = $"{_config.Host}:{port}";
-        flags["wallet.password_file"] = passwordFilePath;
-        // waved is only ever bound to loopback and only ever talked to by this plugin, so
-        // plaintext RPC is acceptable here - a macaroon can't ride an unencrypted connection,
-        // so these two flags must be passed together (see wavelength's INSTALL.md). Actual flag
-        // names are rpc.notls / rpc.no-macaroons (waved/config.go mapstructure tags) - NOT
-        // --no-tls/--no-macaroons, which waved rejects outright ("unknown flag").
-        flags["rpc.notls"] = null;
-        flags["rpc.no-macaroons"] = null;
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = wavedPath,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        foreach (var (key, value) in flags)
-        {
-            startInfo.ArgumentList.Add($"--{key}");
-            if (value is not null)
-                startInfo.ArgumentList.Add(value);
-        }
-
-        // Captured so a startup failure can report *why* waved exited, not just its exit code -
-        // an exit code alone is useless for diagnosing a bad flag/config combination.
-        var startupStderr = new List<string>();
-
-        var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-        process.OutputDataReceived += (_, e) => LogOutput(storeId, e.Data, isError: false);
-        process.ErrorDataReceived += (_, e) =>
-        {
-            LogOutput(storeId, e.Data, isError: true);
-            if (!string.IsNullOrEmpty(e.Data))
+            // Server-wide default first, then whatever the store's connection string actually
+            // asked for (skipping anything WavedReservedFlags owns - the connection string
+            // handler already rejects those at Create() time, this is defense in depth), then the
+            // plugin-owned flags always win regardless of what's upstream of them.
+            var flags = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
             {
-                lock (startupStderr) startupStderr.Add(e.Data);
+                ["network"] = _config.Network,
+            };
+            foreach (var (key, value) in extraFlags)
+            {
+                if (!WavedReservedFlags.Keys.Contains(key))
+                    flags[key] = value;
             }
-        };
+            flags["datadir"] = dataDir;
+            flags["rpc.listenaddr"] = $"{_config.Host}:{port}";
+            flags["wallet.password_file"] = passwordFilePath;
+            // waved is only ever bound to loopback and only ever talked to by this plugin, so
+            // plaintext RPC is acceptable here - a macaroon can't ride an unencrypted connection,
+            // so these two flags must be passed together (see wavelength's INSTALL.md). Actual
+            // flag names are rpc.notls / rpc.no-macaroons (waved/config.go mapstructure tags) -
+            // NOT --no-tls/--no-macaroons, which waved rejects outright ("unknown flag").
+            flags["rpc.notls"] = null;
+            flags["rpc.no-macaroons"] = null;
 
-        if (!process.Start())
-            throw new InvalidOperationException($"Failed to start waved for store {storeId}");
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = wavedPath,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            foreach (var (key, value) in flags)
+            {
+                startInfo.ArgumentList.Add($"--{key}");
+                if (value is not null)
+                    startInfo.ArgumentList.Add(value);
+            }
 
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
+            // Captured so a startup failure can report *why* waved exited, not just its exit code
+            // - an exit code alone is useless for diagnosing a bad flag/config combination.
+            startupStderr = [];
 
-        // GrpcChannel.ForAddress doesn't connect eagerly - the actual connection attempt happens
-        // on the first RPC call, by which point WaitForReadyAsync below has confirmed the port is
-        // accepting connections.
-        var channel = GrpcChannel.ForAddress(uri, new GrpcChannelOptions { Credentials = ChannelCredentials.Insecure });
-        _stores[storeId] = new StoreProcess(process, uri, port, channel, extraFlags);
+            process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+            process.OutputDataReceived += (_, e) => LogOutput(storeId, e.Data, isError: false);
+            process.ErrorDataReceived += (_, e) =>
+            {
+                LogOutput(storeId, e.Data, isError: true);
+                if (!string.IsNullOrEmpty(e.Data))
+                {
+                    lock (startupStderr) startupStderr.Add(e.Data);
+                }
+            };
+
+            if (!process.Start())
+                throw new InvalidOperationException($"Failed to start waved for store {storeId}");
+
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            // GrpcChannel.ForAddress doesn't connect eagerly - the actual connection attempt
+            // happens on the first RPC call, by which point WaitForReadyAsync below has confirmed
+            // the port is accepting connections.
+            var channel = GrpcChannel.ForAddress(uri, new GrpcChannelOptions { Credentials = ChannelCredentials.Insecure });
+            _stores[storeId] = new StoreProcess(process, uri, port, channel, extraFlags);
+        }
+        catch
+        {
+            // Nothing made it into _stores, so the port would otherwise stay reserved forever
+            // with nothing ever going to release it - ReserveFreePort's whole point is a
+            // reservation that lasts until the store actually stops, and a store that never
+            // started counts as already stopped.
+            ReleasePort(port);
+            throw;
+        }
 
         await WaitForReadyAsync(storeId, process, _config.Host, port, startupStderr, cancellationToken);
 
@@ -418,24 +435,33 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     /// was never cleanly killed - e.g. an ungraceful shutdown that didn't give TerminateProcessAsync
     /// a chance to run - keeps its old port bound indefinitely. Reusing that same port for a
     /// different store on the next restart produces exactly the "address already in use" error
-    /// this fixes. Also checked against ports already claimed by stores this instance has itself
-    /// started, since two stores' first-ever start can race concurrently.
+    /// this fixes.
+    ///
+    /// The port is added to <see cref="_reservedPorts"/> before the lock is released, and stays
+    /// reserved until <see cref="ReleasePort"/> is called - not just for the instant of the probe.
+    /// A probe-then-immediately-release check alone isn't enough: the real waved process still has
+    /// to be spawned and reach its own listen() call after this method returns, which takes real
+    /// wall-clock time (building flags, forking/exec'ing, waved's own startup). Without a
+    /// persistent reservation, a second store's StartStoreAsync racing in that gap would probe the
+    /// same now-briefly-free port, see it as available too, and both would try to bind it - exactly
+    /// reproducing the "address already in use" bug this is meant to fix, just moved from
+    /// "orphaned process from a previous run" to "two stores starting at the same time" (which
+    /// BTCPay's own background Lightning listener can trigger across multiple stores concurrently,
+    /// independent of when a human happens to visit each store's dashboard).
     /// </summary>
     private int ReserveFreePort()
     {
         lock (_portLock)
         {
-            var claimed = _stores.Values.Select(sp => sp.Port).ToHashSet();
             for (var port = _config.BasePort; port < _config.BasePort + 10_000; port++)
             {
-                if (claimed.Contains(port))
+                if (_reservedPorts.Contains(port))
                     continue;
 
                 try
                 {
                     using var probe = new TcpListener(IPAddress.Parse(_config.Host), port);
                     probe.Start();
-                    return port;
                 }
                 catch (SocketException)
                 {
@@ -443,11 +469,25 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
                         "Port {Port} is already bound by something outside our own tracking " +
                         "(possibly an orphaned waved instance from before a restart) - trying the next one",
                         port);
+                    continue;
                 }
+
+                _reservedPorts.Add(port);
+                return port;
             }
 
             throw new InvalidOperationException(
                 $"No free port found in range {_config.BasePort}-{_config.BasePort + 10_000} for a new waved instance");
+        }
+    }
+
+    /// <summary>Frees a port reserved by <see cref="ReserveFreePort"/> once its store has stopped
+    /// (or never made it past its own start attempt) - see every call site for why each one is safe.</summary>
+    private void ReleasePort(int port)
+    {
+        lock (_portLock)
+        {
+            _reservedPorts.Remove(port);
         }
     }
 
@@ -606,6 +646,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
             {
                 if (_stores.TryRemove(storeId, out var failed))
                     failed.Channel.Dispose();
+                ReleasePort(port);
 
                 string detail;
                 lock (startupStderr)
@@ -735,6 +776,9 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
             sp.Process.Dispose();
         }
         _stores.Clear();
+
+        lock (_portLock)
+            _reservedPorts.Clear();
 
         foreach (var startLock in _startLocks.Values)
             startLock.Dispose();
