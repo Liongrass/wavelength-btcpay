@@ -344,6 +344,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
 
         Process process;
         List<string> startupStderr;
+        string flagsLog;
         try
         {
             // Server-wide default first, then whatever the store's connection string actually
@@ -411,6 +412,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
             // the port is accepting connections.
             var channel = GrpcChannel.ForAddress(uri, new GrpcChannelOptions { Credentials = ChannelCredentials.Insecure });
             _stores[storeId] = new StoreProcess(process, uri, port, channel, extraFlags);
+            flagsLog = string.Join(' ', flags.Select(kv => kv.Value is null ? $"--{kv.Key}" : $"--{kv.Key}={kv.Value}"));
         }
         catch
         {
@@ -424,8 +426,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
 
         await WaitForReadyAsync(storeId, process, _config.Host, port, startupStderr, cancellationToken);
 
-        _logger.LogInformation("Started waved for store {StoreId} on port {Port} with flags: {Flags}", storeId, port,
-            string.Join(' ', flags.Select(kv => kv.Value is null ? $"--{kv.Key}" : $"--{kv.Key}={kv.Value}")));
+        _logger.LogInformation("Started waved for store {StoreId} on port {Port} with flags: {Flags}", storeId, port, flagsLog);
     }
 
     /// <summary>
