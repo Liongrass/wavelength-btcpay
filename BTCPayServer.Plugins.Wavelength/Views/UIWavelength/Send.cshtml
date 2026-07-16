@@ -2,6 +2,7 @@
 @{
     ViewData.SetLayoutModel(new LayoutModel("Wavelength-Send", StringLocalizer["Send"]).SetCategory("Wavelength"));
     var hasPreview = !string.IsNullOrEmpty(Model.SendIntentId);
+    var awaitingAmount = !hasPreview && Model.IsOnchain && !string.IsNullOrEmpty(Model.Destination);
 }
 
 <h2 class="mb-3">@ViewData["Title"]</h2>
@@ -11,26 +12,7 @@
     <div class="alert alert-danger">@Model.ErrorMessage</div>
 }
 
-@if (!hasPreview)
-{
-    <form method="post" style="max-width: 400px;">
-        @Html.AntiForgeryToken()
-        <div class="mb-3">
-            <label asp-for="Destination" class="form-label">Lightning invoice</label>
-            <textarea asp-for="Destination" class="form-control" rows="3" placeholder="lnbc..."></textarea>
-        </div>
-        <div class="mb-3">
-            <label asp-for="AmountSat" class="form-label">Amount (only for amountless invoices)</label>
-            <div class="input-group">
-                <input asp-for="AmountSat" type="number" min="1" class="form-control" />
-                <span class="input-group-text">sats</span>
-            </div>
-        </div>
-        <button type="submit" name="command" value="preview" class="btn btn-primary">Preview</button>
-        <a asp-action="Index" asp-route-storeId="@Model.StoreId" class="btn btn-link">Back</a>
-    </form>
-}
-else
+@if (hasPreview)
 {
     <div class="widget mb-3" style="max-width: 400px;">
         <dl class="row mb-0">
@@ -59,5 +41,52 @@ else
         <input type="hidden" asp-for="SendIntentId" />
         <button type="submit" name="command" value="confirm" class="btn btn-primary">Confirm send</button>
         <a asp-action="Send" asp-route-storeId="@Model.StoreId" class="btn btn-link">Cancel</a>
+    </form>
+}
+else if (awaitingAmount)
+{
+    <form method="post" style="max-width: 400px;">
+        @Html.AntiForgeryToken()
+        <input type="hidden" asp-for="Destination" />
+        <input type="hidden" asp-for="IsOnchain" />
+        <label class="form-label text-muted text-uppercase small mb-1">Sending to</label>
+        <div class="mb-3">
+            <vc:truncate-center text="@Model.Destination" padding="15" elastic="true" classes="form-control-plaintext w-100" />
+        </div>
+        <div class="mb-3">
+            <label asp-for="AmountSat" class="form-label">Amount</label>
+            <div class="input-group">
+                <input asp-for="AmountSat" type="number" min="1" class="form-control" id="AmountSat" />
+                <span class="input-group-text">sats</span>
+            </div>
+        </div>
+        <div class="form-check mb-3">
+            <input asp-for="SweepAll" type="checkbox" class="form-check-input" id="SweepAll" />
+            <label asp-for="SweepAll" class="form-check-label">Send all (empty the wallet to this address)</label>
+        </div>
+        <button type="submit" name="command" value="preview" class="btn btn-primary">Preview</button>
+        <a asp-action="Send" asp-route-storeId="@Model.StoreId" class="btn btn-link">Cancel</a>
+    </form>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            var sweepAll = document.getElementById("SweepAll");
+            var amountInput = document.getElementById("AmountSat");
+            function sync() { amountInput.disabled = sweepAll.checked; }
+            sweepAll.addEventListener("change", sync);
+            sync();
+        });
+    </script>
+}
+else
+{
+    <form method="post" class="w-100">
+        @Html.AntiForgeryToken()
+        <div class="mb-3">
+            <label asp-for="Destination" class="form-label">Lightning invoice or on-chain address</label>
+            <textarea asp-for="Destination" class="form-control w-100" rows="3" placeholder="lnbc... or bc1..."></textarea>
+        </div>
+        <button type="submit" name="command" value="detect" class="btn btn-primary">Continue</button>
+        <a asp-action="Index" asp-route-storeId="@Model.StoreId" class="btn btn-link">Back</a>
     </form>
 }
