@@ -27,6 +27,16 @@
         </h2>
         <div id="CustomWavelengthContent" class="accordion-collapse collapse" aria-labelledby="CustomWavelengthHeader" data-bs-parent="#CustomNodeSupport">
             <div class="accordion-body">
+                <p class="mb-2">
+                    Wavelength can be run with either Lightweight (<code>lwwallet</code>), Neutrino
+                    (<code>btcwallet</code>), or LND as a wallet backend. You may choose between
+                    <code>mainnet</code>, <code>signet</code>, <code>testnet</code>, <code>simnet</code>, and
+                    <code>regtest</code>.<br />
+                    Each store may run its own <code>waved</code> instance on a separate network with a
+                    separate backend.<br />
+                    Please note that before switching between wallets or networks on the same store, the
+                    wallet has to be emptied and deleted.
+                </p>
                 <ul class="pb-2">
                     <li class="mb-2">
                         <div class="text-muted small">Wallet: Lightweight</div>
