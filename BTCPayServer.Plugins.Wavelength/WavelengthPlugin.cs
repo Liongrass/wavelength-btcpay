@@ -34,7 +34,7 @@ public class WavelengthPlugin : BaseBTCPayServerPlugin
 
         services.AddSingleton<ILightningConnectionStringHandler, WavelengthLightningConnectionStringHandler>();
 
-        services.AddUIExtension("ln-payment-method-setup-tab", "/Views/Lightning/LNPaymentMethodSetupTab.cshtml");
+        services.AddUIExtension("ln-payment-method-setup-tab", "/Views/Lightning/Wavelength/LNPaymentMethodSetupTab.cshtml");
         services.AddUIExtension("store-wallets-nav", "Wavelength/NavExtension");
 
         base.Execute(services);
