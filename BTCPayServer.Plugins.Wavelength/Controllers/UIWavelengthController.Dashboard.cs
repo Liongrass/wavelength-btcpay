@@ -38,8 +38,24 @@ public partial class UIWavelengthController
 
         if (!await processManager.WalletExistsAsync(storeId, cancellationToken))
         {
-            return View(new WavelengthWalletViewModel { StoreId = storeId, IsRunning = true, WalletExists = false });
+            if (processManager.TryGetCreationError(storeId, out var creationError))
+                TempData[WellKnownTempData.ErrorMessage] = creationError;
+
+            return View(new WavelengthWalletViewModel
+            {
+                StoreId = storeId,
+                IsRunning = true,
+                WalletExists = false,
+                IsCreatingWallet = processManager.IsCreatingWallet(storeId)
+            });
         }
+
+        // Creation may have finished in the background (see CreateWallet/StartCreateWalletAsync)
+        // while nobody was waiting on the request that started it - if its mnemonic is still
+        // sitting unclaimed, this visit is what shows it, instead of silently landing on the
+        // normal dashboard and losing it for good.
+        if (mnemonicCache.HasPending(storeId))
+            return RedirectToAction(nameof(Mnemonic), new { storeId });
 
         try
         {
@@ -80,12 +96,6 @@ public partial class UIWavelengthController
         try
         {
             await processManager.EnsureStartedAsync(storeId, cancellationToken: cancellationToken);
-            var mnemonic = await processManager.CreateWalletAsync(storeId);
-            if (mnemonic is null)
-            {
-                TempData[WellKnownTempData.ErrorMessage] = "A wallet already exists for this store.";
-                return RedirectToAction(nameof(Index), new { storeId });
-            }
         }
         catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or RpcException)
         {
@@ -93,10 +103,12 @@ public partial class UIWavelengthController
             return RedirectToAction(nameof(Index), new { storeId });
         }
 
-        // The Mnemonic action reads the same WavedMnemonicOnceCache entry CreateWalletAsync just
-        // wrote and shows it via TakeOnce - there is no notification fallback; this redirect is
-        // the only place the mnemonic is ever shown.
-        return RedirectToAction(nameof(Mnemonic), new { storeId });
+        // Deliberately not awaited - waved's InitWallet can take long enough that waiting for it
+        // inline here risks a reverse proxy's own gateway timeout firing before waved responds
+        // (see StartCreateWalletAsync's doc comment). The dashboard we redirect to instead shows a
+        // "creating" state and auto-refreshes until WalletExistsAsync/HasPending picks it up.
+        _ = processManager.StartCreateWalletAsync(storeId);
+        return RedirectToAction(nameof(Index), new { storeId });
     }
 
     private static WavelengthActivityRowViewModel ToRow(WalletEntry entry) => new()

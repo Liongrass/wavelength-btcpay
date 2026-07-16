@@ -25,18 +25,35 @@ else if (!Model.IsRunning)
 
 @if (Model.IsRunning && !Model.WalletExists)
 {
-    <div class="widget text-center py-5">
-        <h5 class="mb-3">This store doesn't have a Wavelength wallet yet</h5>
-        <p class="text-muted mb-4 mx-auto" style="max-width: 480px;">
-            Creating one generates a new recovery phrase, shown to you exactly once right after
-            you click below - write it down before you leave this page. It is never stored
-            anywhere else, so if you lose it, it cannot be recovered.
-        </p>
-        <form method="post" asp-action="CreateWallet" asp-route-storeId="@Model.StoreId" class="d-inline">
-            @Html.AntiForgeryToken()
-            <button type="submit" class="btn btn-primary">Create wallet</button>
-        </form>
-    </div>
+    @if (Model.IsCreatingWallet)
+    {
+        <meta http-equiv="refresh" content="2">
+        <div class="widget text-center py-5">
+            <div class="spinner-border text-primary mb-3" role="status">
+                <span class="visually-hidden">Creating...</span>
+            </div>
+            <h5 class="mb-3">Creating your wallet&hellip;</h5>
+            <p class="text-muted mb-0 mx-auto" style="max-width: 480px;">
+                This can take a little while - this page will refresh automatically until it's
+                ready, then show your new recovery phrase. Please don't close this tab.
+            </p>
+        </div>
+    }
+    else
+    {
+        <div class="widget text-center py-5">
+            <h5 class="mb-3">This store doesn't have a Wavelength wallet yet</h5>
+            <p class="text-muted mb-4 mx-auto" style="max-width: 480px;">
+                Creating one generates a new recovery phrase, shown to you exactly once right after
+                you click below - write it down before you leave this page. It is never stored
+                anywhere else, so if you lose it, it cannot be recovered.
+            </p>
+            <form method="post" asp-action="CreateWallet" asp-route-storeId="@Model.StoreId" class="d-inline">
+                @Html.AntiForgeryToken()
+                <button type="submit" class="btn btn-primary">Create wallet</button>
+            </form>
+        </div>
+    }
 }
 
 @if (Model.IsRunning && Model.WalletExists)

@@ -45,6 +45,8 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
 
     private readonly ConcurrentDictionary<string, StoreProcess> _stores = new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _startLocks = new();
+    private readonly ConcurrentDictionary<string, Task<string[]?>> _creationTasks = new();
+    private readonly object _creationLock = new();
     private readonly ConcurrentQueue<string> _removedStoreIds = new();
     private IEventAggregatorSubscription? _storeRemovedSub;
     private int _nextPort;
@@ -480,6 +482,56 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
                 storeId, ex.Status.Detail);
             return null;
         }
+    }
+
+    /// <summary>True while a Create RPC for this store is in flight.</summary>
+    public bool IsCreatingWallet(string storeId)
+        => _creationTasks.TryGetValue(storeId, out var task) && !task.IsCompleted;
+
+    /// <summary>
+    /// Kicks off wallet creation without waiting for it to finish. waved's InitWallet can take
+    /// long enough that awaiting it inline in an HTTP request risks a reverse proxy's own gateway
+    /// timeout firing before waved responds - showing the visitor a 504 even though the wallet
+    /// really did get created a moment later, and (without this) leaving the mnemonic sitting
+    /// unseen in WavedMnemonicOnceCache forever, since nothing would ever redirect to Mnemonic to
+    /// collect it. Callers should redirect the visitor to a page that polls IsCreatingWallet /
+    /// WalletExistsAsync instead of awaiting this directly - see UIWavelengthController's
+    /// Index/CreateWallet actions. Safe to call while a creation for this store is already in
+    /// flight - returns the same task rather than starting a redundant one.
+    /// </summary>
+    public Task<string[]?> StartCreateWalletAsync(string storeId)
+    {
+        lock (_creationLock)
+        {
+            if (_creationTasks.TryGetValue(storeId, out var existing) && !existing.IsCompleted)
+                return existing;
+
+            var task = CreateWalletAsync(storeId);
+            _creationTasks[storeId] = task;
+            _ = task.ContinueWith(t =>
+            {
+                if (t.IsFaulted)
+                    _logger.LogError(t.Exception, "Wallet creation failed for store {StoreId}", storeId);
+            }, TaskScheduler.Default);
+            return task;
+        }
+    }
+
+    /// <summary>
+    /// Returns and clears the error from this store's most recent failed background creation, or
+    /// false if the last attempt succeeded (or none has run). One-shot, like
+    /// WavedMnemonicOnceCache - shown once via TempData, not on every subsequent dashboard reload.
+    /// </summary>
+    public bool TryGetCreationError(string storeId, out string? error)
+    {
+        error = null;
+        if (!_creationTasks.TryGetValue(storeId, out var task) || !task.IsFaulted)
+            return false;
+
+        _creationTasks.TryRemove(storeId, out _);
+        var ex = task.Exception?.InnerException ?? task.Exception;
+        error = ex is RpcException rpcEx ? rpcEx.Status.Detail : ex?.Message;
+        return true;
     }
 
     private static string WritePasswordFile(string dataDir, string password)
