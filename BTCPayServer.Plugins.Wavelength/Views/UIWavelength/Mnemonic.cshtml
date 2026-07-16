@@ -10,9 +10,9 @@
 @if (Model.Mnemonic is null)
 {
     <div class="alert alert-warning">
-        This recovery phrase has already been viewed (or was never generated for this store) and
-        is not stored anywhere - it cannot be shown again. If you did not record it, the wallet's
-        on-disk data is still the only copy that exists.
+        This recovery phrase has already been acknowledged (or was never generated for this
+        store) and is not stored anywhere - it cannot be shown again. If you did not record it,
+        the wallet's on-disk data is still the only copy that exists.
     </div>
     <a asp-action="Index" asp-route-storeId="@Model.StoreId">Back to Wavelength</a>
 }
@@ -20,8 +20,8 @@ else
 {
     <div class="alert alert-danger">
         Below is your wallet's seed phrase. It can be used to recover your funds in case of a
-        fatal error. The seed can only be shown once - we recommend you write it down by hand on
-        a piece of paper.
+        fatal error. It will keep being shown, here and on the dashboard, until you confirm below
+        that you've written it down by hand on a piece of paper - it is never stored anywhere.
     </div>
 
     <p class="mb-3">
@@ -47,5 +47,8 @@ else
         </div>
     </div>
 
-    <a asp-action="Index" asp-route-storeId="@Model.StoreId" class="btn btn-primary">I wrote it down.</a>
+    <form method="post" asp-action="AcknowledgeMnemonic" asp-route-storeId="@Model.StoreId" class="d-inline">
+        @Html.AntiForgeryToken()
+        <button type="submit" class="btn btn-primary">I wrote it down.</button>
+    </form>
 }

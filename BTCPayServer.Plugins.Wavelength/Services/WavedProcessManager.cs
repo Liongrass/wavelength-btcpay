@@ -39,7 +39,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     private readonly StoreRepository _storeRepository;
     private readonly EventAggregator _eventAggregator;
     private readonly WavedWalletCredentialStore _credentialStore;
-    private readonly WavedMnemonicOnceCache _mnemonicCache;
+    private readonly WavedMnemonicPendingCache _mnemonicCache;
     private readonly ILogger<WavedProcessManager> _logger;
     private readonly string _nativeDir;
 
@@ -57,7 +57,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         StoreRepository storeRepository,
         EventAggregator eventAggregator,
         WavedWalletCredentialStore credentialStore,
-        WavedMnemonicOnceCache mnemonicCache,
+        WavedMnemonicPendingCache mnemonicCache,
         ILogger<WavedProcessManager> logger)
     {
         _config = config;
@@ -203,7 +203,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     public async Task DeleteStoreDataAsync(string storeId)
     {
         await StopStoreAsync(storeId);
-        _mnemonicCache.TakeOnce(storeId);
+        _mnemonicCache.Acknowledge(storeId);
 
         var settings = await _storeRepository.GetSettingAsync<WavedStoreSettings>(storeId, WavedStoreSettings.SettingsKey);
         if (settings is not null)
@@ -433,7 +433,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     /// EnsureStartedAsync first) and returns its mnemonic, or null if a wallet already existed
     /// (a safe no-op - see InitWallet's atomic guard in waved/rpc_wallet.go). Deliberately never
     /// called automatically: wallet creation generates a seed that only ever exists in memory
-    /// until the caller shows it to a human (see WavedMnemonicOnceCache) - it must never happen
+    /// until the caller shows it to a human (see WavedMnemonicPendingCache) - it must never happen
     /// as a side effect of something else (a dashboard page load, or worse, an inbound Lightning
     /// payment attempt on a store nobody has finished setting up yet) where nobody is watching
     /// for it.
@@ -468,9 +468,11 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
             var mnemonic = response.Mnemonic.ToArray();
 
             // The mnemonic is never persisted anywhere - held in memory only until the store
-            // owner views it once (see WavedMnemonicOnceCache) or the process restarts, whichever
-            // is first. This cache entry is also the hand-off from CreateWallet's POST action to
-            // the Mnemonic GET action it redirects to - there is no other copy of this value.
+            // owner explicitly acknowledges writing it down (see WavedMnemonicPendingCache) or
+            // the process restarts, whichever is first. Re-visiting the dashboard or the mnemonic
+            // page in the meantime re-shows the same phrase rather than losing it. This cache
+            // entry is also the hand-off from CreateWallet's POST action to the Mnemonic GET
+            // action it redirects to - there is no other copy of this value.
             _mnemonicCache.Store(storeId, string.Join(' ', mnemonic));
 
             return mnemonic;
@@ -493,7 +495,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     /// long enough that awaiting it inline in an HTTP request risks a reverse proxy's own gateway
     /// timeout firing before waved responds - showing the visitor a 504 even though the wallet
     /// really did get created a moment later, and (without this) leaving the mnemonic sitting
-    /// unseen in WavedMnemonicOnceCache forever, since nothing would ever redirect to Mnemonic to
+    /// unseen in WavedMnemonicPendingCache forever, since nothing would ever redirect to Mnemonic to
     /// collect it. Callers should redirect the visitor to a page that polls IsCreatingWallet /
     /// WalletExistsAsync instead of awaiting this directly - see UIWavelengthController's
     /// Index/CreateWallet actions. Safe to call while a creation for this store is already in
@@ -519,8 +521,9 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
 
     /// <summary>
     /// Returns and clears the error from this store's most recent failed background creation, or
-    /// false if the last attempt succeeded (or none has run). One-shot, like
-    /// WavedMnemonicOnceCache - shown once via TempData, not on every subsequent dashboard reload.
+    /// false if the last attempt succeeded (or none has run). Take-once, unlike
+    /// WavedMnemonicPendingCache's Peek - shown once via TempData, not on every subsequent
+    /// dashboard reload.
     /// </summary>
     public bool TryGetCreationError(string storeId, out string? error)
     {

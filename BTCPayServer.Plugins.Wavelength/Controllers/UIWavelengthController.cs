@@ -20,7 +20,7 @@ namespace BTCPayServer.Plugins.Wavelength.Controllers;
 public partial class UIWavelengthController(
     WavedProcessManager processManager,
     WavedConfiguration config,
-    WavedMnemonicOnceCache mnemonicCache,
+    WavedMnemonicPendingCache mnemonicCache,
     StoreRepository storeRepository,
     PaymentMethodHandlerDictionary handlers) : Controller
 {
@@ -71,16 +71,25 @@ public partial class UIWavelengthController(
         return null;
     }
 
-    // Deliberately a GET, not a POST: CreateWallet redirects here (a redirect is always a GET),
-    // and TakeOnce only ever succeeds once regardless - a second visit (refresh, back button)
-    // finds nothing left to show.
+    // Deliberately a GET, not a POST: CreateWallet redirects here (a redirect is always a GET).
+    // Peek is non-destructive - revisiting this page (refresh, back button, coming back later)
+    // keeps showing the same phrase until AcknowledgeMnemonic is called, rather than losing it
+    // the moment it's shown once.
     [HttpGet("mnemonic")]
     public IActionResult Mnemonic(string storeId)
     {
         var store = HttpContext.GetStoreDataOrNull();
         if (store is null) return NotFound();
 
-        var mnemonic = mnemonicCache.TakeOnce(storeId);
+        var mnemonic = mnemonicCache.Peek(storeId);
         return View(new WavelengthMnemonicViewModel { StoreId = storeId, StoreName = store.StoreName, Mnemonic = mnemonic });
+    }
+
+    // The only place a pending mnemonic is ever cleared - see WavedMnemonicPendingCache.
+    [HttpPost("mnemonic/acknowledge")]
+    public IActionResult AcknowledgeMnemonic(string storeId)
+    {
+        mnemonicCache.Acknowledge(storeId);
+        return RedirectToAction(nameof(Index), new { storeId });
     }
 }

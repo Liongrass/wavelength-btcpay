@@ -27,7 +27,7 @@ public class WavelengthPlugin : BaseBTCPayServerPlugin
 
         services.AddSingleton<WavedConfiguration>();
         services.AddSingleton<WavedWalletCredentialStore>();
-        services.AddSingleton<WavedMnemonicOnceCache>();
+        services.AddSingleton<WavedMnemonicPendingCache>();
 
         services.AddSingleton<WavedProcessManager>();
         services.AddHostedService(sp => sp.GetRequiredService<WavedProcessManager>());
