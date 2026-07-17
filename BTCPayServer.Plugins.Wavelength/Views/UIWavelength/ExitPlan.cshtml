@@ -1,0 +1,111 @@
+@model WavelengthExitPlanViewModel
+@{
+    ViewData.SetLayoutModel(new LayoutModel("Wavelength-Vtxos", StringLocalizer["Unilateral Exit Plan"]).SetCategory("Wavelength"));
+}
+
+<h2 class="mb-3">@ViewData["Title"]</h2>
+
+<div class="alert alert-danger">
+    <strong>This is a preview only - nothing has been started yet.</strong> A unilateral exit
+    settles each VTXO directly on-chain instead of cooperatively through the Ark server. It is
+    <strong>irreversible</strong> once started, and on-chain fees can be substantial - review the
+    funding requirements and fee rate below carefully before proceeding.
+</div>
+
+@if (!string.IsNullOrEmpty(Model.ErrorMessage))
+{
+    <div class="alert alert-danger">@Model.ErrorMessage</div>
+}
+
+<div class="widget mb-4">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Outpoint</th>
+                    <th>Funding address</th>
+                    <th>Fee UTXOs needed</th>
+                    <th class="text-end">Recommended funding</th>
+                    <th class="text-end">Shortfall</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (Model.Plans.Count == 0)
+                {
+                    <tr>
+                        <td colspan="6" class="text-center text-muted py-4">No plan entries</td>
+                    </tr>
+                }
+                else
+                {
+                    @foreach (var plan in Model.Plans)
+                    {
+                        <tr>
+                            <td><code class="text-break">@plan.Outpoint</code></td>
+                            <td>
+                                @if (!string.IsNullOrEmpty(plan.FundingAddress))
+                                {
+                                    <code class="text-break">@plan.FundingAddress</code>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">Not needed</span>
+                                }
+                            </td>
+                            <td>
+                                @plan.RequiredFeeUtxoCount required
+                                (@plan.UsableFeeUtxoCount already usable),
+                                ~@plan.RecommendedUtxoAmountSat.ToString("N0") sats each
+                            </td>
+                            <td class="text-end">@plan.RecommendedTotalFundingSat.ToString("N0") sats</td>
+                            <td class="text-end @(plan.FundingShortfallSat > 0 ? "text-danger fw-semibold" : "")">
+                                @plan.FundingShortfallSat.ToString("N0") sats
+                            </td>
+                            <td>
+                                @if (!string.IsNullOrEmpty(plan.Error))
+                                {
+                                    <span class="badge bg-danger">@plan.Error</span>
+                                }
+                                else if (plan.CanStart)
+                                {
+                                    <span class="badge bg-success">Ready</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-warning text-dark">@plan.InfeasibilityReason</span>
+                                }
+                                @if (plan.ExitJobFound)
+                                {
+                                    <div class="text-muted small mt-1">Existing exit job: @plan.ExitStatus</div>
+                                }
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="widget mb-4">
+    <h6 class="mb-3">Totals</h6>
+    <dl class="row mb-0">
+        <dt class="col-3">Fee rate</dt>
+        <dd class="col-9">@Model.FeeRateSatPerVbyte sat/vB</dd>
+        <dt class="col-3">Total funding shortfall</dt>
+        <dd class="col-9 @(Model.TotalFundingShortfallSat > 0 ? "text-danger fw-semibold" : "")">
+            @Model.TotalFundingShortfallSat.ToString("N0") sats
+        </dd>
+        <dt class="col-3">Total recommended funding</dt>
+        <dd class="col-9">@Model.TotalRecommendedFundingSat.ToString("N0") sats</dd>
+        <dt class="col-3">Can start now</dt>
+        <dd class="col-9">@Model.CanStart</dd>
+    </dl>
+    <p class="text-muted mt-3 mb-0">
+        "Can start now" reflects every selected VTXO being funded simultaneously from the same
+        backing wallet, not each in isolation - fund the shortfall above (if any) before starting.
+    </p>
+</div>
+
+<a asp-action="Vtxos" asp-route-storeId="@Model.StoreId" class="btn btn-link">Back to VTXOs</a>

@@ -16,89 +16,126 @@
 }
 else
 {
-    <div class="widget">
-        <div class="table-responsive">
-            <table class="table table-hover mb-0">
-                <thead>
-                    <tr>
-                        <th>Status</th>
-                        <th>Outpoint</th>
-                        <th class="text-end">Amount</th>
-                        <th>Expiry</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @if (Model.Vtxos.Count == 0)
-                    {
+    <form method="post" asp-action="ExitPlan" asp-route-storeId="@Model.StoreId">
+        @Html.AntiForgeryToken()
+        <div class="widget">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
                         <tr>
-                            <td colspan="4" class="text-center text-muted py-4">No VTXOs</td>
+                            <th style="width: 2.5rem;">
+                                <input type="checkbox" class="form-check-input" id="vtxo-select-all" />
+                            </th>
+                            <th>Status</th>
+                            <th>Outpoint</th>
+                            <th class="text-end">Amount</th>
+                            <th>Expiry</th>
                         </tr>
-                    }
-                    else
-                    {
-                        @for (var i = 0; i < Model.Vtxos.Count; i++)
+                    </thead>
+                    <tbody>
+                        @if (Model.Vtxos.Count == 0)
                         {
-                            var vtxo = Model.Vtxos[i];
-                            var detailId = $"vtxo-detail-{i}";
-                            var badgeClass = vtxo.Status switch
-                            {
-                                "Live" => "bg-success",
-                                "PendingForfeit" or "Forfeiting" or "Spending" or "PendingRound" => "bg-info",
-                                "Forfeited" or "Spent" => "bg-secondary",
-                                "UnilateralExit" or "Failed" => "bg-danger",
-                                _ => "bg-secondary"
-                            };
-
-                            <tr style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#@detailId" role="button" aria-expanded="false">
-                                <td><span class="badge @badgeClass">@vtxo.Status</span></td>
-                                <td><code class="text-break">@vtxo.Outpoint</code></td>
-                                <td class="text-end">@vtxo.AmountSat.ToString("N0") sats</td>
-                                <td>@vtxo.BatchExpiry</td>
-                            </tr>
-                            <tr class="collapse" id="@detailId">
-                                <td colspan="4" class="bg-light">
-                                    <dl class="row mb-0 small">
-                                        <dt class="col-3">Round ID</dt>
-                                        <dd class="col-9"><code>@vtxo.RoundId</code></dd>
-                                        <dt class="col-3">Created height</dt>
-                                        <dd class="col-9">@vtxo.CreatedHeight</dd>
-                                        <dt class="col-3">Relative expiry</dt>
-                                        <dd class="col-9">@vtxo.RelativeExpiry blocks</dd>
-                                        <dt class="col-3">Chain depth</dt>
-                                        <dd class="col-9">@vtxo.ChainDepth</dd>
-                                        <dt class="col-3">PK script</dt>
-                                        <dd class="col-9"><code class="text-break">@vtxo.PkScript</code></dd>
-                                        <dt class="col-3">Commitment txid</dt>
-                                        <dd class="col-9"><code class="text-break">@vtxo.CommitmentTxid</code></dd>
-                                        @if (!string.IsNullOrEmpty(vtxo.SpentByTxid))
-                                        {
-                                            <dt class="col-3">Spent by txid</dt>
-                                            <dd class="col-9"><code class="text-break">@vtxo.SpentByTxid</code></dd>
-                                        }
-                                        @if (vtxo.HasExpiryInfo)
-                                        {
-                                            <dt class="col-3">Expiry status</dt>
-                                            <dd class="col-9">@vtxo.ExpiryStatus</dd>
-                                            <dt class="col-3">Blocks remaining</dt>
-                                            <dd class="col-9">
-                                                @vtxo.BlocksRemaining (refresh at @vtxo.RefreshThresholdBlocks,
-                                                critical at @vtxo.CriticalThresholdBlocks)
-                                            </dd>
-                                        }
-                                        @if (vtxo.HasSettlement)
-                                        {
-                                            <dt class="col-3">Settled in</dt>
-                                            <dd class="col-9"><code>@vtxo.SettlementTxid</code> at height @vtxo.SettlementHeight</dd>
-                                        }
-                                    </dl>
-                                </td>
+                            <tr>
+                                <td colspan="5" class="text-center text-muted py-4">No VTXOs</td>
                             </tr>
                         }
-                    }
-                </tbody>
-            </table>
+                        else
+                        {
+                            @for (var i = 0; i < Model.Vtxos.Count; i++)
+                            {
+                                var vtxo = Model.Vtxos[i];
+                                var detailId = $"vtxo-detail-{i}";
+                                var badgeClass = vtxo.Status switch
+                                {
+                                    "Live" => "bg-success",
+                                    "PendingForfeit" or "Forfeiting" or "Spending" or "PendingRound" => "bg-info",
+                                    "Forfeited" or "Spent" => "bg-secondary",
+                                    "UnilateralExit" or "Failed" => "bg-danger",
+                                    _ => "bg-secondary"
+                                };
+
+                                <tr style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#@detailId" role="button" aria-expanded="false">
+                                    <td onclick="event.stopPropagation();">
+                                        <input type="checkbox" class="form-check-input vtxo-select" name="outpoints" value="@vtxo.Outpoint" />
+                                    </td>
+                                    <td><span class="badge @badgeClass">@vtxo.Status</span></td>
+                                    <td><code class="text-break">@vtxo.Outpoint</code></td>
+                                    <td class="text-end">@vtxo.AmountSat.ToString("N0") sats</td>
+                                    <td>@vtxo.BatchExpiry</td>
+                                </tr>
+                                <tr class="collapse" id="@detailId">
+                                    <td colspan="5" class="bg-light">
+                                        <dl class="row mb-0 small">
+                                            <dt class="col-3">Round ID</dt>
+                                            <dd class="col-9"><code>@vtxo.RoundId</code></dd>
+                                            <dt class="col-3">Created height</dt>
+                                            <dd class="col-9">@vtxo.CreatedHeight</dd>
+                                            <dt class="col-3">Relative expiry</dt>
+                                            <dd class="col-9">@vtxo.RelativeExpiry blocks</dd>
+                                            <dt class="col-3">Chain depth</dt>
+                                            <dd class="col-9">@vtxo.ChainDepth</dd>
+                                            <dt class="col-3">PK script</dt>
+                                            <dd class="col-9"><code class="text-break">@vtxo.PkScript</code></dd>
+                                            <dt class="col-3">Commitment txid</dt>
+                                            <dd class="col-9"><code class="text-break">@vtxo.CommitmentTxid</code></dd>
+                                            @if (!string.IsNullOrEmpty(vtxo.SpentByTxid))
+                                            {
+                                                <dt class="col-3">Spent by txid</dt>
+                                                <dd class="col-9"><code class="text-break">@vtxo.SpentByTxid</code></dd>
+                                            }
+                                            @if (vtxo.HasExpiryInfo)
+                                            {
+                                                <dt class="col-3">Expiry status</dt>
+                                                <dd class="col-9">@vtxo.ExpiryStatus</dd>
+                                                <dt class="col-3">Blocks remaining</dt>
+                                                <dd class="col-9">
+                                                    @vtxo.BlocksRemaining (refresh at @vtxo.RefreshThresholdBlocks,
+                                                    critical at @vtxo.CriticalThresholdBlocks)
+                                                </dd>
+                                            }
+                                            @if (vtxo.HasSettlement)
+                                            {
+                                                <dt class="col-3">Settled in</dt>
+                                                <dd class="col-9"><code>@vtxo.SettlementTxid</code> at height @vtxo.SettlementHeight</dd>
+                                            }
+                                        </dl>
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
         </div>
-    </div>
+
+        <div class="widget mt-4">
+            <h6 class="mb-3 text-danger">Danger zone</h6>
+            <p class="text-muted">
+                Preview a unilateral exit for the selected VTXOs - settling them directly on-chain
+                instead of cooperatively through the Ark server. This only previews the funding
+                required; nothing is started here. A unilateral exit itself is irreversible and can
+                carry high on-chain fees.
+            </p>
+            <button type="submit" class="btn btn-outline-danger">Unilateral Exit</button>
+        </div>
+    </form>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            var selectAll = document.getElementById("vtxo-select-all");
+            var checkboxes = document.querySelectorAll(".vtxo-select");
+            if (!selectAll) return;
+
+            selectAll.addEventListener("change", function () {
+                checkboxes.forEach(function (cb) { cb.checked = selectAll.checked; });
+            });
+            checkboxes.forEach(function (cb) {
+                cb.addEventListener("change", function () {
+                    selectAll.checked = Array.prototype.every.call(checkboxes, function (c) { return c.checked; });
+                });
+            });
+        });
+    </script>
 }
 
 <a asp-action="Advanced" asp-route-storeId="@Model.StoreId" class="btn btn-link mt-3">Back to Advanced</a>
