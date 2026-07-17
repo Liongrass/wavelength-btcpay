@@ -15,24 +15,36 @@
     <div class="alert alert-warning" style="max-width: 400px;">@Model.RateErrorMessage</div>
 }
 
-<form method="post" class="mb-4" style="max-width: 400px;">
-    @Html.AntiForgeryToken()
-    <div class="mb-3">
-        <label asp-for="Amount" class="form-label">Amount</label>
-        <div class="input-group">
-            <input asp-for="Amount" type="number" min="0" step="any" class="form-control" id="Amount" />
-            <input asp-for="Currency" class="form-control" style="max-width: 6.5rem;" id="Currency" currency-selection />
+<div class="row">
+    <div class="col-md-5">
+        <form method="post" class="mb-4">
+            @Html.AntiForgeryToken()
+            <div class="mb-3">
+                <label asp-for="Amount" class="form-label">Amount</label>
+                <div class="input-group">
+                    <input asp-for="Amount" type="number" min="0" step="any" class="form-control" id="Amount" />
+                    <input asp-for="Currency" class="form-control" style="max-width: 6.5rem;" id="Currency" currency-selection />
+                </div>
+                <div class="form-text" id="rate-reference"></div>
+                <div class="form-text" id="rate-conversion"></div>
+            </div>
+            <div class="mb-3">
+                <label asp-for="Memo" class="form-label">Memo (optional)</label>
+                <input asp-for="Memo" class="form-control" maxlength="200" />
+            </div>
+            <button type="submit" class="btn btn-primary">Create invoice</button>
+            <a asp-action="Index" asp-route-storeId="@Model.StoreId" class="btn btn-link">Back</a>
+        </form>
+    </div>
+    @if (!string.IsNullOrEmpty(Model.Invoice))
+    {
+        <div class="col-md-5 offset-md-2">
+            <div class="text-center p-3 bg-white rounded">
+                <div id="receive-qr"></div>
+            </div>
         </div>
-        <div class="form-text" id="rate-reference"></div>
-        <div class="form-text" id="rate-conversion"></div>
-    </div>
-    <div class="mb-3">
-        <label asp-for="Memo" class="form-label">Memo (optional)</label>
-        <input asp-for="Memo" class="form-control" maxlength="200" />
-    </div>
-    <button type="submit" class="btn btn-primary">Create invoice</button>
-    <a asp-action="Index" asp-route-storeId="@Model.StoreId" class="btn btn-link">Back</a>
-</form>
+    }
+</div>
 
 <script>
     document.addEventListener("DOMContentLoaded", function () {
@@ -92,12 +104,14 @@
 
 @if (!string.IsNullOrEmpty(Model.Invoice))
 {
-    <div class="widget" style="max-width: 400px;">
-        <div class="text-center p-3 bg-white rounded mb-3">
-            <div id="receive-qr"></div>
-        </div>
+    <div class="mt-4">
         <label class="form-label text-muted text-uppercase small">Invoice</label>
-        <vc:truncate-center text="@Model.Invoice" padding="15" elastic="true" classes="form-control-plaintext w-100" />
+        <div class="d-flex align-items-start gap-2">
+            <code class="text-break flex-grow-1">@Model.Invoice</code>
+            <button type="button" class="btn btn-link p-0 clipboard-button" data-clipboard="@Model.Invoice" title="Copy invoice">
+                <vc:icon symbol="actions-copy" />
+            </button>
+        </div>
     </div>
 
     <script src="~/js/qrcode.js" asp-append-version="true"></script>
