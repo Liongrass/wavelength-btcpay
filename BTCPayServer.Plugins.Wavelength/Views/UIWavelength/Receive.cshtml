@@ -108,11 +108,46 @@
         <label class="form-label text-muted text-uppercase small">Invoice</label>
         <div class="d-flex align-items-start gap-2">
             <code class="text-break flex-grow-1">@Model.Invoice</code>
-            <button type="button" class="btn btn-link p-0 clipboard-button" data-clipboard="@Model.Invoice" title="Copy invoice">
+            <button type="button" class="btn btn-link p-0" id="copy-invoice-button" title="Copy invoice">
                 <vc:icon symbol="actions-copy" />
             </button>
+            <span class="text-success small d-none" id="copy-invoice-confirm">Copied</span>
         </div>
     </div>
+
+    @* Wired up immediately, right here, rather than relying on the site-wide data-clipboard
+       delegate - that one only attaches inside copy-to-clipboard.js's own DOMContentLoaded
+       handler, which can't fire until every earlier blocking script in LayoutFoot (jQuery,
+       Bootstrap, Moment, Flatpickr, ...) has finished loading. This script runs as soon as the
+       parser reaches it, right after the button above already exists in the DOM. *@
+    <script>
+        (function () {
+            var button = document.getElementById("copy-invoice-button");
+            var confirmLabel = document.getElementById("copy-invoice-confirm");
+            var text = @Safe.Json(Model.Invoice);
+            if (!button) return;
+
+            button.addEventListener("click", function () {
+                var copy = navigator.clipboard && navigator.clipboard.writeText
+                    ? navigator.clipboard.writeText(text)
+                    : Promise.resolve().then(function () {
+                        var textarea = document.createElement("textarea");
+                        textarea.value = text;
+                        textarea.style.position = "fixed";
+                        textarea.style.opacity = "0";
+                        document.body.appendChild(textarea);
+                        textarea.select();
+                        document.execCommand("copy");
+                        document.body.removeChild(textarea);
+                    });
+
+                copy.then(function () {
+                    confirmLabel.classList.remove("d-none");
+                    setTimeout(function () { confirmLabel.classList.add("d-none"); }, 1500);
+                });
+            });
+        })();
+    </script>
 
     <script src="~/js/qrcode.js" asp-append-version="true"></script>
     <script>
