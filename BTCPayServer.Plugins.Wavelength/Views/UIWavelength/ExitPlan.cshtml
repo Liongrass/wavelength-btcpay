@@ -5,11 +5,11 @@
 
 <h2 class="mb-3">@ViewData["Title"]</h2>
 
-<div class="alert alert-danger">
-    <strong>This is a preview only - nothing has been started yet.</strong> A unilateral exit
-    settles each VTXO directly on-chain instead of cooperatively through the Ark server. It is
-    <strong>irreversible</strong> once started, and on-chain fees can be substantial - review the
-    funding requirements and fee rate below carefully before proceeding.
+<div class="alert alert-warning">
+    A unilateral exit settles each VTXO directly on-chain instead of cooperatively through the
+    Ark server. It is irreversible once started, and on-chain fees can be substantial. Only do
+    this if you have no other choice and review the funding requirements and fee rate below
+    carefully before proceeding.
 </div>
 
 @if (!string.IsNullOrEmpty(Model.ErrorMessage))
