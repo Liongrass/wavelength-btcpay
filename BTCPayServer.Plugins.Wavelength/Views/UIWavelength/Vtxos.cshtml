@@ -21,10 +21,10 @@ else
             <table class="table table-hover mb-0">
                 <thead>
                     <tr>
-                        <th>Outpoint</th>
                         <th>Status</th>
+                        <th>Outpoint</th>
                         <th class="text-end">Amount</th>
-                        <th>Batch expiry</th>
+                        <th>Expiry</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -50,8 +50,8 @@ else
                             };
 
                             <tr style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#@detailId" role="button" aria-expanded="false">
-                                <td><code class="text-break">@vtxo.Outpoint</code></td>
                                 <td><span class="badge @badgeClass">@vtxo.Status</span></td>
+                                <td><code class="text-break">@vtxo.Outpoint</code></td>
                                 <td class="text-end">@vtxo.AmountSat.ToString("N0") sats</td>
                                 <td>@vtxo.BatchExpiry</td>
                             </tr>
