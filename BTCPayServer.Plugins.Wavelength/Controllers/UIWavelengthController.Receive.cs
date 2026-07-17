@@ -11,7 +11,7 @@ namespace BTCPayServer.Plugins.Wavelength.Controllers;
 public partial class UIWavelengthController
 {
     [HttpGet("receive")]
-    public async Task<IActionResult> Receive(string storeId, string? currency, CancellationToken cancellationToken)
+    public async Task<IActionResult> Receive(string storeId, CancellationToken cancellationToken)
     {
         var store = HttpContext.GetStoreDataOrNull();
         if (store is null) return NotFound();
@@ -20,11 +20,7 @@ public partial class UIWavelengthController
         if (await RedirectIfNoWalletAsync(storeId, cancellationToken) is { } redirect)
             return redirect;
 
-        var model = new WavelengthReceiveViewModel
-        {
-            StoreId = storeId,
-            Currency = string.IsNullOrWhiteSpace(currency) ? store.GetStoreBlob().DefaultCurrency : currency.Trim()
-        };
+        var model = new WavelengthReceiveViewModel { StoreId = storeId };
         await PopulateRateAsync(model, store, cancellationToken);
         return View(model);
     }
@@ -38,8 +34,33 @@ public partial class UIWavelengthController
 
         model.StoreId = storeId;
         model.Invoice = null;
+        // Populated fresh before validation, not round-tripped from the form, so the exchange
+        // rate actually used to derive AmountSat below is always this same request's own fetch -
+        // never a stale or client-supplied value.
+        await PopulateRateAsync(model, store, cancellationToken);
 
-        if (model.AmountSat <= 0)
+        if (model.Amount is not > 0)
+        {
+            model.ErrorMessage = "Enter an amount greater than zero.";
+            return View(model);
+        }
+
+        long amountSat;
+        if (IsSats(model.Currency))
+        {
+            amountSat = (long)model.Amount.Value;
+        }
+        else if (model.Rate is > 0)
+        {
+            amountSat = (long)Math.Round(model.Amount.Value / model.Rate.Value * 100_000_000m);
+        }
+        else
+        {
+            model.ErrorMessage = model.RateErrorMessage ?? $"Could not fetch a {model.Currency} rate.";
+            return View(model);
+        }
+
+        if (amountSat <= 0)
         {
             model.ErrorMessage = "Enter an amount greater than zero.";
             return View(model);
@@ -59,7 +80,7 @@ public partial class UIWavelengthController
         {
             var response = await wallet.RecvAsync(new RecvRequest
             {
-                AmtSat = (ulong)model.AmountSat,
+                AmtSat = (ulong)amountSat,
                 Memo = model.Memo ?? string.Empty
             }, cancellationToken: cancellationToken);
             model.Invoice = response.Invoice;
@@ -72,16 +93,41 @@ public partial class UIWavelengthController
         return View(model);
     }
 
-    // Fiat conversion is display-only: the rate/divisibility populated here only drive the
-    // client-side JS that keeps the sats and fiat inputs in sync (see Receive.cshtml) - the
-    // backend never uses anything but the resulting AmountSat, so a stale or tampered Rate field
-    // can at most show the wrong number on the visitor's own screen, never affect what invoice
-    // actually gets created. Uses this store's own configured rate rules (RateFetcher), the same
-    // machinery BTCPay core prices invoices/POS with - not a hardcoded exchange.
+    // Backs the Amount field's live client-side conversion display - see Receive.cshtml. Called
+    // via fetch() whenever the currency box changes, since there's no live rate-streaming API to
+    // subscribe to; a fresh one-shot fetch per change is what BTCPay core's own equivalents
+    // (e.g. WalletSend) do too, just baked in at page load instead of on every currency switch.
+    [HttpGet("receive/rate")]
+    public async Task<IActionResult> ReceiveRate(string storeId, string currency, CancellationToken cancellationToken)
+    {
+        var store = HttpContext.GetStoreDataOrNull();
+        if (store is null) return NotFound();
+        if (GetWavelengthConfig(store) is null) return NotFound();
+
+        var model = new WavelengthReceiveViewModel { StoreId = storeId, Currency = currency };
+        await PopulateRateAsync(model, store, cancellationToken);
+        return Json(new
+        {
+            rate = (double?)model.Rate,
+            currency = model.RateCurrency,
+            divisibility = model.RateDivisibility,
+            error = model.RateErrorMessage
+        });
+    }
+
+    private static bool IsSats(string currency) => string.Equals(currency, "sats", StringComparison.OrdinalIgnoreCase);
+
+    // Uses this store's own configured rate rules (RateFetcher), the same machinery BTCPay core
+    // prices invoices/POS with - not a hardcoded exchange. Rates the store's own default currency
+    // when the amount unit is sats (a helpful reference even though no conversion is needed for
+    // the amount itself), or the selected currency directly otherwise.
     private async Task PopulateRateAsync(WavelengthReceiveViewModel model, StoreData store, CancellationToken cancellationToken)
     {
+        var referenceCurrency = IsSats(model.Currency) ? store.GetStoreBlob().DefaultCurrency : model.Currency;
         var rateRules = store.GetStoreBlob().GetRateRules(defaultRules);
-        var currencyPair = new CurrencyPair("BTC", model.Currency);
+        var currencyPair = new CurrencyPair("BTC", referenceCurrency);
+
+        model.RateCurrency = currencyPair.Right;
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(TimeSpan.FromSeconds(5));
@@ -95,7 +141,7 @@ public partial class UIWavelengthController
             }
 
             model.Rate = result.BidAsk.Center;
-            model.FiatDivisibility = currencyTable.GetNumberFormatInfo(currencyPair.Right, true).CurrencyDecimalDigits;
+            model.RateDivisibility = currencyTable.GetNumberFormatInfo(currencyPair.Right, true).CurrencyDecimalDigits;
         }
         catch (OperationCanceledException)
         {

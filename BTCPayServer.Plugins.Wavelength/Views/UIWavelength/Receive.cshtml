@@ -15,37 +15,17 @@
     <div class="alert alert-warning" style="max-width: 400px;">@Model.RateErrorMessage</div>
 }
 
-<form method="get" asp-action="Receive" asp-route-storeId="@Model.StoreId" class="mb-3 d-flex align-items-end gap-2" style="max-width: 400px;">
-    <div class="flex-grow-1">
-        <label asp-for="Currency" class="form-label">Fiat currency for reference</label>
-        <input asp-for="Currency" class="form-control" currency-selection />
-    </div>
-    <button type="submit" class="btn btn-outline-secondary">Update rate</button>
-</form>
-
 <form method="post" class="mb-4" style="max-width: 400px;">
     @Html.AntiForgeryToken()
-    <input type="hidden" asp-for="Currency" />
-    <input type="hidden" asp-for="Rate" />
-    <input type="hidden" asp-for="FiatDivisibility" />
     <div class="mb-3">
-        <label asp-for="AmountSat" class="form-label">Amount</label>
+        <label asp-for="Amount" class="form-label">Amount</label>
         <div class="input-group">
-            <input asp-for="AmountSat" type="number" min="1" class="form-control" id="AmountSat" />
-            <span class="input-group-text">sats</span>
+            <input asp-for="Amount" type="number" min="0" step="any" class="form-control" id="Amount" />
+            <input asp-for="Currency" class="form-control" style="max-width: 6.5rem;" id="Currency" currency-selection />
         </div>
+        <div class="form-text" id="rate-reference"></div>
+        <div class="form-text" id="rate-conversion"></div>
     </div>
-    @if (Model.Rate is > 0)
-    {
-        <div class="mb-3">
-            <label asp-for="AmountFiat" class="form-label">Amount (@Model.Currency, approximate)</label>
-            <div class="input-group">
-                <input asp-for="AmountFiat" type="number" min="0" step="any" class="form-control" id="AmountFiat" />
-                <span class="input-group-text">@Model.Currency</span>
-            </div>
-            <div class="form-text">1 BTC &asymp; @Model.Rate.Value.ToString("N2") @Model.Currency</div>
-        </div>
-    }
     <div class="mb-3">
         <label asp-for="Memo" class="form-label">Memo (optional)</label>
         <input asp-for="Memo" class="form-control" maxlength="200" />
@@ -54,33 +34,61 @@
     <a asp-action="Index" asp-route-storeId="@Model.StoreId" class="btn btn-link">Back</a>
 </form>
 
-@if (Model.Rate is > 0)
-{
-    <script>
-        document.addEventListener("DOMContentLoaded", function () {
-            var rate = @Html.Raw(Model.Rate.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            var fiatDivisibility = @Model.FiatDivisibility;
-            var satInput = document.getElementById("AmountSat");
-            var fiatInput = document.getElementById("AmountFiat");
-            if (!satInput || !fiatInput) return;
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        var amountInput = document.getElementById("Amount");
+        var currencyInput = document.getElementById("Currency");
+        var referenceEl = document.getElementById("rate-reference");
+        var conversionEl = document.getElementById("rate-conversion");
+        if (!amountInput || !currencyInput) return;
 
-            function satsToFiat() {
-                var sats = parseFloat(satInput.value);
-                if (!sats) { fiatInput.value = ""; return; }
-                fiatInput.value = ((sats / 100000000) * rate).toFixed(fiatDivisibility);
-            }
-            function fiatToSats() {
-                var fiat = parseFloat(fiatInput.value);
-                if (!fiat) { satInput.value = ""; return; }
-                satInput.value = Math.round((fiat / rate) * 100000000);
-            }
+        var state = {
+            rate: @Html.Raw(Model.Rate?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"),
+            currency: @Safe.Json(Model.RateCurrency ?? ""),
+            divisibility: @Model.RateDivisibility
+        };
+        var rateUrl = @Safe.Json(Url.Action("ReceiveRate", new { storeId = Model.StoreId }));
 
-            satInput.addEventListener("input", satsToFiat);
-            fiatInput.addEventListener("input", fiatToSats);
-            satsToFiat();
-        });
-    </script>
-}
+        function isSats(value) {
+            return (value || "").trim().toLowerCase() === "sats";
+        }
+
+        function updateReference() {
+            referenceEl.textContent = state.rate
+                ? ("1 BTC ≈ " + state.rate.toFixed(2) + " " + state.currency)
+                : "";
+        }
+
+        function updateConversion() {
+            var amount = parseFloat(amountInput.value);
+            if (!amount || !state.rate) { conversionEl.textContent = ""; return; }
+            if (isSats(currencyInput.value)) {
+                var fiat = (amount / 100000000) * state.rate;
+                conversionEl.textContent = "≈ " + fiat.toFixed(state.divisibility) + " " + state.currency;
+            } else {
+                var sats = Math.round((amount / state.rate) * 100000000);
+                conversionEl.textContent = "≈ " + sats.toLocaleString() + " sats";
+            }
+        }
+
+        function refreshRate() {
+            fetch(rateUrl + "?currency=" + encodeURIComponent(currencyInput.value || "sats"))
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    state.rate = data.rate;
+                    state.currency = data.currency;
+                    state.divisibility = data.divisibility;
+                    updateReference();
+                    updateConversion();
+                });
+        }
+
+        amountInput.addEventListener("input", updateConversion);
+        currencyInput.addEventListener("change", refreshRate);
+        updateReference();
+        updateConversion();
+    });
+</script>
 
 @if (!string.IsNullOrEmpty(Model.Invoice))
 {
