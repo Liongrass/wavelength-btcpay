@@ -1,0 +1,104 @@
+@model WavelengthVtxosViewModel
+@{
+    ViewData.SetLayoutModel(new LayoutModel("Wavelength-Vtxos", StringLocalizer["VTXOs"]).SetCategory("Wavelength"));
+}
+
+<h2 class="mb-3">@ViewData["Title"]</h2>
+
+@if (!string.IsNullOrEmpty(Model.ErrorMessage))
+{
+    <div class="alert alert-danger">@Model.ErrorMessage</div>
+}
+
+@if (!Model.IsRunning)
+{
+    <p class="text-muted">This store's waved instance is not currently running.</p>
+}
+else
+{
+    <div class="widget">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Outpoint</th>
+                        <th>Status</th>
+                        <th class="text-end">Amount</th>
+                        <th>Batch expiry</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (Model.Vtxos.Count == 0)
+                    {
+                        <tr>
+                            <td colspan="4" class="text-center text-muted py-4">No VTXOs</td>
+                        </tr>
+                    }
+                    else
+                    {
+                        @for (var i = 0; i < Model.Vtxos.Count; i++)
+                        {
+                            var vtxo = Model.Vtxos[i];
+                            var detailId = $"vtxo-detail-{i}";
+                            var badgeClass = vtxo.Status switch
+                            {
+                                "Live" => "bg-success",
+                                "PendingForfeit" or "Forfeiting" or "Spending" or "PendingRound" => "bg-info",
+                                "Forfeited" or "Spent" => "bg-secondary",
+                                "UnilateralExit" or "Failed" => "bg-danger",
+                                _ => "bg-secondary"
+                            };
+
+                            <tr style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#@detailId" role="button" aria-expanded="false">
+                                <td><code class="text-break">@vtxo.Outpoint</code></td>
+                                <td><span class="badge @badgeClass">@vtxo.Status</span></td>
+                                <td class="text-end">@vtxo.AmountSat.ToString("N0") sats</td>
+                                <td>@vtxo.BatchExpiry</td>
+                            </tr>
+                            <tr class="collapse" id="@detailId">
+                                <td colspan="4" class="bg-light">
+                                    <dl class="row mb-0 small">
+                                        <dt class="col-3">Round ID</dt>
+                                        <dd class="col-9"><code>@vtxo.RoundId</code></dd>
+                                        <dt class="col-3">Created height</dt>
+                                        <dd class="col-9">@vtxo.CreatedHeight</dd>
+                                        <dt class="col-3">Relative expiry</dt>
+                                        <dd class="col-9">@vtxo.RelativeExpiry blocks</dd>
+                                        <dt class="col-3">Chain depth</dt>
+                                        <dd class="col-9">@vtxo.ChainDepth</dd>
+                                        <dt class="col-3">PK script</dt>
+                                        <dd class="col-9"><code class="text-break">@vtxo.PkScript</code></dd>
+                                        <dt class="col-3">Commitment txid</dt>
+                                        <dd class="col-9"><code class="text-break">@vtxo.CommitmentTxid</code></dd>
+                                        @if (!string.IsNullOrEmpty(vtxo.SpentByTxid))
+                                        {
+                                            <dt class="col-3">Spent by txid</dt>
+                                            <dd class="col-9"><code class="text-break">@vtxo.SpentByTxid</code></dd>
+                                        }
+                                        @if (vtxo.HasExpiryInfo)
+                                        {
+                                            <dt class="col-3">Expiry status</dt>
+                                            <dd class="col-9">@vtxo.ExpiryStatus</dd>
+                                            <dt class="col-3">Blocks remaining</dt>
+                                            <dd class="col-9">
+                                                @vtxo.BlocksRemaining (refresh at @vtxo.RefreshThresholdBlocks,
+                                                critical at @vtxo.CriticalThresholdBlocks)
+                                            </dd>
+                                        }
+                                        @if (vtxo.HasSettlement)
+                                        {
+                                            <dt class="col-3">Settled in</dt>
+                                            <dd class="col-9"><code>@vtxo.SettlementTxid</code> at height @vtxo.SettlementHeight</dd>
+                                        }
+                                    </dl>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+<a asp-action="Advanced" asp-route-storeId="@Model.StoreId" class="btn btn-link mt-3">Back to Advanced</a>
