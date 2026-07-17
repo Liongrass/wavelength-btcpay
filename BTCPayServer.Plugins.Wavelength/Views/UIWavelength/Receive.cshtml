@@ -10,15 +10,42 @@
     <div class="alert alert-danger">@Model.ErrorMessage</div>
 }
 
+@if (!string.IsNullOrEmpty(Model.RateErrorMessage))
+{
+    <div class="alert alert-warning" style="max-width: 400px;">@Model.RateErrorMessage</div>
+}
+
+<form method="get" asp-action="Receive" asp-route-storeId="@Model.StoreId" class="mb-3 d-flex align-items-end gap-2" style="max-width: 400px;">
+    <div class="flex-grow-1">
+        <label asp-for="Currency" class="form-label">Fiat currency for reference</label>
+        <input asp-for="Currency" class="form-control" currency-selection />
+    </div>
+    <button type="submit" class="btn btn-outline-secondary">Update rate</button>
+</form>
+
 <form method="post" class="mb-4" style="max-width: 400px;">
     @Html.AntiForgeryToken()
+    <input type="hidden" asp-for="Currency" />
+    <input type="hidden" asp-for="Rate" />
+    <input type="hidden" asp-for="FiatDivisibility" />
     <div class="mb-3">
         <label asp-for="AmountSat" class="form-label">Amount</label>
         <div class="input-group">
-            <input asp-for="AmountSat" type="number" min="1" class="form-control" />
+            <input asp-for="AmountSat" type="number" min="1" class="form-control" id="AmountSat" />
             <span class="input-group-text">sats</span>
         </div>
     </div>
+    @if (Model.Rate is > 0)
+    {
+        <div class="mb-3">
+            <label asp-for="AmountFiat" class="form-label">Amount (@Model.Currency, approximate)</label>
+            <div class="input-group">
+                <input asp-for="AmountFiat" type="number" min="0" step="any" class="form-control" id="AmountFiat" />
+                <span class="input-group-text">@Model.Currency</span>
+            </div>
+            <div class="form-text">1 BTC &asymp; @Model.Rate.Value.ToString("N2") @Model.Currency</div>
+        </div>
+    }
     <div class="mb-3">
         <label asp-for="Memo" class="form-label">Memo (optional)</label>
         <input asp-for="Memo" class="form-control" maxlength="200" />
@@ -26,6 +53,34 @@
     <button type="submit" class="btn btn-primary">Create invoice</button>
     <a asp-action="Index" asp-route-storeId="@Model.StoreId" class="btn btn-link">Back</a>
 </form>
+
+@if (Model.Rate is > 0)
+{
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            var rate = @Html.Raw(Model.Rate.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            var fiatDivisibility = @Model.FiatDivisibility;
+            var satInput = document.getElementById("AmountSat");
+            var fiatInput = document.getElementById("AmountFiat");
+            if (!satInput || !fiatInput) return;
+
+            function satsToFiat() {
+                var sats = parseFloat(satInput.value);
+                if (!sats) { fiatInput.value = ""; return; }
+                fiatInput.value = ((sats / 100000000) * rate).toFixed(fiatDivisibility);
+            }
+            function fiatToSats() {
+                var fiat = parseFloat(fiatInput.value);
+                if (!fiat) { satInput.value = ""; return; }
+                satInput.value = Math.round((fiat / rate) * 100000000);
+            }
+
+            satInput.addEventListener("input", satsToFiat);
+            fiatInput.addEventListener("input", fiatToSats);
+            satsToFiat();
+        });
+    </script>
+}
 
 @if (!string.IsNullOrEmpty(Model.Invoice))
 {

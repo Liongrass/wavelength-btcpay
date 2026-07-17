@@ -7,6 +7,7 @@ using BTCPayServer.Payments.Lightning;
 using BTCPayServer.Plugins.Wavelength.Services;
 using BTCPayServer.Plugins.Wavelength.ViewModels;
 using BTCPayServer.Services.Invoices;
+using BTCPayServer.Services.Rates;
 using BTCPayServer.Services.Stores;
 using Grpc.Core;
 using Microsoft.AspNetCore.Authorization;
@@ -22,7 +23,10 @@ public partial class UIWavelengthController(
     WavedConfiguration config,
     WavedMnemonicPendingCache mnemonicCache,
     StoreRepository storeRepository,
-    PaymentMethodHandlerDictionary handlers) : Controller
+    PaymentMethodHandlerDictionary handlers,
+    CurrencyNameTable currencyTable,
+    RateFetcher rateFetcher,
+    DefaultRulesCollection defaultRules) : Controller
 {
     // BTC is the only crypto code wavelength-btcpay's connection string handler is registered
     // against - see WavelengthLightningConnectionStringHandler.
