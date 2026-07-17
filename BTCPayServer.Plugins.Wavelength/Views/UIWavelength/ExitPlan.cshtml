@@ -53,11 +53,7 @@
                                     <span class="text-muted">Not needed</span>
                                 }
                             </td>
-                            <td>
-                                @plan.RequiredFeeUtxoCount required
-                                (@plan.UsableFeeUtxoCount already usable),
-                                ~@plan.RecommendedUtxoAmountSat.ToString("N0") sats each
-                            </td>
+                            <td>@plan.UsableFeeUtxoCount/@plan.RequiredFeeUtxoCount</td>
                             <td class="text-end">@plan.RecommendedTotalFundingSat.ToString("N0") sats</td>
                             <td class="text-end @(plan.FundingShortfallSat > 0 ? "text-danger fw-semibold" : "")">
                                 @plan.FundingShortfallSat.ToString("N0") sats
