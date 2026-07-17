@@ -126,7 +126,7 @@ else if (!Model.IsRunning)
                                     @entry.AmountSat.ToString("N0") sats
                                 </td>
                                 <td>
-                                    <span class="text-muted">@(entry.Id.Length > 6 ? entry.Id[..6] : entry.Id)</span>
+                                    <span class="text-muted font-monospace d-inline-block" style="width: 6ch;">@(entry.Id.Length > 6 ? entry.Id[..6] : entry.Id)</span>
                                     <button type="button" class="btn btn-link p-0 clipboard-button" data-clipboard="@entry.Id" title="Copy ID">
                                         <vc:icon symbol="actions-copy" />
                                     </button>
