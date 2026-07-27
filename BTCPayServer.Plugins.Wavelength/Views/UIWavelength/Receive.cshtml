@@ -151,11 +151,17 @@
 
     <script src="~/js/qrcode.js" asp-append-version="true"></script>
     <script>
+        // Deliberately not useSVG: true - that option forces qrcode.js's SVG drawer, which
+        // appends one individual SVG element per dark module in a synchronous loop (see
+        // wwwroot/js/qrcode.js's svgDrawer.draw). For a longer BOLT-11 invoice (more routing
+        // hints -> bigger QR version -> quadratically more modules) that loop can block the main
+        // thread long enough to trigger Firefox's slow-script warning and even hang the tab. The
+        // default canvas path draws the same code with pixel fillRect calls instead - no
+        // per-module DOM node creation, and no such blowup with invoice length.
         new QRCode(document.getElementById("receive-qr"), {
             text: @Safe.Json(Model.Invoice),
             width: 256,
             height: 256,
-            useSVG: true,
             correctLevel: QRCode.CorrectLevel.M
         });
     </script>
