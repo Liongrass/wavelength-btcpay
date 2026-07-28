@@ -67,6 +67,24 @@
 </div>
 
 <div class="widget mt-4">
+    <h6 class="mb-3">Restart waved</h6>
+    <p class="text-muted">
+        Stop and restart this store's <code>waved</code> instance, re-reading its flags from the
+        current Lightning connection string instead of whatever was last persisted. Use this after
+        editing the connection string to apply the change without a full BTCPay restart.
+    </p>
+    <p class="text-muted">
+        <strong>Before changing the wallet backend or network</strong>, delete this store's wallet
+        first (see the Danger zone below) - <code>waved</code> cannot switch backend or network on
+        an existing wallet in place, and restarting it with mismatched flags will fail to start.
+    </p>
+    <form method="post" asp-action="Restart" asp-route-storeId="@Model.StoreId" class="d-inline">
+        @Html.AntiForgeryToken()
+        <button type="submit" class="btn btn-outline-secondary">Restart waved</button>
+    </form>
+</div>
+
+<div class="widget mt-4">
     <h6 class="mb-3">VTXOs</h6>
     <p class="text-muted">
         Inspect every VTXO this wallet currently holds - outpoint, status, amount, and batch

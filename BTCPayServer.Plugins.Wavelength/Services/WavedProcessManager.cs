@@ -145,6 +145,41 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         }
     }
 
+    /// <summary>
+    /// Stops this store's waved instance (if running) and starts it again with
+    /// <paramref name="extraFlags"/> - meant for flags freshly re-parsed from the store's
+    /// CURRENT live connection string (see UIWavelengthController.Advanced's "Restart waved"
+    /// action), not whatever was last persisted. Serialized under the same per-store lock as
+    /// EnsureStartedAsync - stopping and starting without it would let a concurrent
+    /// EnsureStartedAsync interleave and win the race with stale persisted flags instead of
+    /// these fresh ones.
+    /// </summary>
+    public async Task RestartAsync(
+        string storeId, IReadOnlyDictionary<string, string> extraFlags, CancellationToken cancellationToken)
+    {
+        var startLock = _startLocks.GetOrAdd(storeId, _ => new SemaphoreSlim(1, 1));
+        await startLock.WaitAsync(cancellationToken);
+        try
+        {
+            await PersistFlagsAsync(storeId, extraFlags, cancellationToken);
+
+            if (IsRunning(storeId))
+                await StopStoreAsync(storeId);
+
+            if (await _storeRepository.FindStore(storeId) is null)
+            {
+                _logger.LogWarning("Ignoring RestartAsync for non-existent store {StoreId}", storeId);
+                return;
+            }
+
+            await StartStoreAsync(storeId, extraFlags, cancellationToken);
+        }
+        finally
+        {
+            startLock.Release();
+        }
+    }
+
     private async Task PersistFlagsAsync(
         string storeId, IReadOnlyDictionary<string, string> extraFlags, CancellationToken cancellationToken)
     {

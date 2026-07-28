@@ -32,7 +32,24 @@ public sealed class WavelengthLightningConnectionStringHandler(IServiceProvider 
             return null;
         }
 
-        var extraFlags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!TryParseExtraFlags(connectionString, out var extraFlags, out error))
+            return null;
+
+        return ActivatorUtilities.CreateInstance<WavelengthLightningClient>(
+            serviceProvider, network, storeId, (IReadOnlyDictionary<string, string>)extraFlags);
+    }
+
+    /// <summary>
+    /// Extracts the extra waved flags from a wavelength connection string ("type" and "store-id"
+    /// stripped, WavedReservedFlags.Keys rejected) - the same parsing <see cref="Create"/> uses,
+    /// exposed so other call sites (e.g. the Advanced page's "Restart waved" action, which needs
+    /// to re-derive flags from the store's current live connection string rather than whatever
+    /// was last persisted) don't have to duplicate it.
+    /// </summary>
+    public static bool TryParseExtraFlags(string connectionString, out Dictionary<string, string> extraFlags, out string? error)
+    {
+        extraFlags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var kv = LightningConnectionStringHelper.ExtractValues(connectionString, out _);
         foreach (var (key, value) in kv)
         {
             if (key is "type" or "store-id")
@@ -42,14 +59,13 @@ public sealed class WavelengthLightningConnectionStringHandler(IServiceProvider 
             {
                 error = $"The key '{key}' is managed by the plugin and cannot be set in a wavelength " +
                         "connection string. Remove it - everything else waved accepts is passed through.";
-                return null;
+                return false;
             }
 
             extraFlags[key] = value;
         }
 
         error = null;
-        return ActivatorUtilities.CreateInstance<WavelengthLightningClient>(
-            serviceProvider, network, storeId, (IReadOnlyDictionary<string, string>)extraFlags);
+        return true;
     }
 }

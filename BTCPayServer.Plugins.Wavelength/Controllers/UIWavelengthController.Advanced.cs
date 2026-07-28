@@ -1,3 +1,5 @@
+using BTCPayServer.Abstractions.Constants;
+using BTCPayServer.Plugins.Wavelength.Lightning;
 using BTCPayServer.Plugins.Wavelength.Services;
 using BTCPayServer.Plugins.Wavelength.ViewModels;
 using Grpc.Core;
@@ -57,5 +59,39 @@ public partial class UIWavelengthController
         }
 
         return View(vm);
+    }
+
+    // Stops and restarts this store's waved with flags freshly re-parsed from the store's
+    // CURRENT live connection string, not whatever was last persisted - see
+    // WavedProcessManager.RestartAsync. Deliberately does not touch datadir/network/wallet
+    // type itself; if those changed, the operator needs to delete the wallet first (see the
+    // disclaimer on the Advanced page) since waved can't switch backend/network on an existing
+    // wallet in place.
+    [HttpPost("advanced/restart")]
+    public async Task<IActionResult> Restart(string storeId, CancellationToken cancellationToken)
+    {
+        var store = HttpContext.GetStoreDataOrNull();
+        if (store is null) return NotFound();
+        var wavelengthConfig = GetWavelengthConfig(store);
+        if (wavelengthConfig?.ConnectionString is null) return RedirectToLightningSetup(storeId);
+
+        if (!WavelengthLightningConnectionStringHandler.TryParseExtraFlags(
+                wavelengthConfig.ConnectionString, out var extraFlags, out var parseError))
+        {
+            TempData[WellKnownTempData.ErrorMessage] = parseError;
+            return RedirectToAction(nameof(Advanced), new { storeId });
+        }
+
+        try
+        {
+            await processManager.RestartAsync(storeId, extraFlags, cancellationToken);
+            TempData[WellKnownTempData.SuccessMessage] = "waved restarted with the current connection string's flags.";
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or RpcException)
+        {
+            TempData[WellKnownTempData.ErrorMessage] = ex is RpcException rpcEx ? rpcEx.Status.Detail : ex.Message;
+        }
+
+        return RedirectToAction(nameof(Advanced), new { storeId });
     }
 }
