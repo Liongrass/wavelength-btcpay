@@ -37,6 +37,24 @@ else if (!Model.IsRunning)
                 This can take a little while - this page will refresh automatically until it's
                 ready, then show your new recovery phrase. Please don't close this tab.
             </p>
+            @if (Model.SyncBlockHeight is not null || Model.SyncWalletState is not null)
+            {
+                <p class="text-muted small mb-0 mt-2 mx-auto" style="max-width: 480px;">
+                    Chain backend:
+                    @if (Model.SyncBlockHeight is not null)
+                    {
+                        <text>block height @Model.SyncBlockHeight.Value.ToString("N0")</text>
+                    }
+                    @if (Model.SyncWalletState is not null)
+                    {
+                        <text>, wallet state <code>@Model.SyncWalletState</code></text>
+                    }
+                    @if (Model.SyncBlockHeight is 0)
+                    {
+                        <text> - still syncing, this is normal for a fresh Neutrino/btcwallet backend.</text>
+                    }
+                </p>
+            }
         </div>
     }
     else

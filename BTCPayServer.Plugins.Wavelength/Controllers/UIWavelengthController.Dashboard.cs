@@ -2,6 +2,7 @@ using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Plugins.Wavelength.ViewModels;
 using Grpc.Core;
 using Microsoft.AspNetCore.Mvc;
+using Waverpc;
 using Wavewalletrpc;
 
 namespace BTCPayServer.Plugins.Wavelength.Controllers;
@@ -41,13 +42,29 @@ public partial class UIWavelengthController
             if (processManager.TryGetCreationError(storeId, out var creationError))
                 TempData[WellKnownTempData.ErrorMessage] = creationError;
 
-            return View(new WavelengthWalletViewModel
+            var isCreating = processManager.IsCreatingWallet(storeId);
+            var vm = new WavelengthWalletViewModel
             {
                 StoreId = storeId,
                 IsRunning = true,
                 WalletExists = false,
-                IsCreatingWallet = processManager.IsCreatingWallet(storeId)
-            });
+                IsCreatingWallet = isCreating
+            };
+
+            // Best-effort only - a failed GetInfo here just means the spinner shows without a
+            // sync-progress hint, not an error worth surfacing on top of "still creating".
+            if (isCreating && processManager.GetDaemonClient(storeId) is { } daemon)
+            {
+                try
+                {
+                    var info = await daemon.GetInfoAsync(new GetInfoRequest(), cancellationToken: cancellationToken);
+                    vm.SyncBlockHeight = info.BlockHeight;
+                    vm.SyncWalletState = info.WalletState.ToString();
+                }
+                catch (RpcException) { }
+            }
+
+            return View(vm);
         }
 
         // Creation may have finished in the background (see CreateWallet/StartCreateWalletAsync)

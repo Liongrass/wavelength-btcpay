@@ -586,13 +586,22 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     /// our own code stopped waiting for the response. A token parameter here would invite exactly
     /// that mistake again, so there deliberately isn't one; this method always runs to its own
     /// internal timeout regardless of what happens to the caller's request.
+    ///
+    /// That internal timeout is deliberately long (see <see cref="CreateWalletTimeout"/>), not a
+    /// normal-case ceiling: Create can't return until waved's chosen wallet backend is actually
+    /// ready, and for a Neutrino (btcwallet) backend that means waiting for it to sync first,
+    /// which can easily take longer than a short fixed window on a cold start with slow peer
+    /// connectivity - there's no fixed duration that's "long enough" for that in general, so this
+    /// is a safety net against a wallet backend that will genuinely never become ready, not a
+    /// timeout for the normal case. See UIWavelengthController.Dashboard.cs's Index action for
+    /// how sync progress (block height / wallet state) is surfaced while this is in flight.
     /// </summary>
     public async Task<string[]?> CreateWalletAsync(string storeId)
     {
         var wallet = GetWalletClient(storeId)
             ?? throw new InvalidOperationException($"waved for store {storeId} is not running");
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(CreateWalletTimeout);
 
         var password = await _credentialStore.GetOrCreatePasswordAsync(storeId, cts.Token);
 
@@ -623,7 +632,26 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
                 storeId, ex.Status.Detail);
             return null;
         }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled && cts.IsCancellationRequested)
+        {
+            // Grpc.Net.Client surfaces our own CancellationToken firing as a Cancelled
+            // RpcException, not an OperationCanceledException - without this catch, that would
+            // propagate as a bare, unexplained "cancelled" error with no indication that it's
+            // CreateWalletTimeout being hit rather than something actually wrong.
+            throw new TimeoutException(
+                $"waved did not finish creating the wallet for store {storeId} within " +
+                $"{CreateWalletTimeout.TotalMinutes:N0} minutes - it may still be waiting for its " +
+                "chain backend to sync. Check the Advanced page's block height and wallet state, " +
+                "and try again once it's caught up.");
+        }
     }
+
+    /// <summary>
+    /// A safety net against a wallet backend that will genuinely never become ready, not a
+    /// normal-case ceiling - see CreateWalletAsync's doc comment for why a short fixed timeout
+    /// doesn't fit here.
+    /// </summary>
+    private static readonly TimeSpan CreateWalletTimeout = TimeSpan.FromMinutes(30);
 
     /// <summary>True while a Create RPC for this store is in flight.</summary>
     public bool IsCreatingWallet(string storeId)

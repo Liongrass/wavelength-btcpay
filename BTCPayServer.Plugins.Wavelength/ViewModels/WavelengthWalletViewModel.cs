@@ -6,6 +6,14 @@ public sealed class WavelengthWalletViewModel
     public bool IsRunning { get; set; }
     public bool WalletExists { get; set; } = true;
     public bool IsCreatingWallet { get; set; }
+
+    // Shown alongside the "creating your wallet" spinner - lets a chain-backend sync in
+    // progress (the most common reason creation takes a long time) read as visible progress
+    // instead of a plain, indistinguishable-from-hung spinner. Null if unavailable (e.g. waved's
+    // GetInfo call itself failed).
+    public uint? SyncBlockHeight { get; set; }
+    public string? SyncWalletState { get; set; }
+
     public string? StartupError { get; set; }
     public long ConfirmedSat { get; set; }
     public long PendingInSat { get; set; }
