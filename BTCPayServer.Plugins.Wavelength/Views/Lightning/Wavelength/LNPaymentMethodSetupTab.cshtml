@@ -1,10 +1,16 @@
 @model BTCPayServer.Models.StoreViewModels.LightningNodeViewModel
+@using BTCPayServer.Plugins.Wavelength.Services
+@inject WavedStoreTokenProtector TokenProtector
 @{
-    var storeId = Model.StoreId;
     if (Model.CryptoCode != "BTC")
     {
         return;
     }
+    // A store's real ID is often visible to anyone with even minor access to that store (it's in
+    // the URL) - the connection string uses an opaque token instead, so reaching this store's
+    // waved instance requires actually possessing this generated string, not just knowing its ID.
+    // See WavedStoreTokenProtector's doc comment.
+    var token = TokenProtector.Protect(Model.StoreId);
 }
 
 <script>
@@ -40,19 +46,23 @@
                 <ul class="pb-2">
                     <li class="mb-2">
                         <div class="text-muted small">Wallet: Lightweight</div>
-                        <code><b>type=</b>wavelength;<b>store-id=</b>@storeId</code>
+                        <code><b>type=</b>wavelength;<b>token=</b>@token</code>
                     </li>
                     <li class="mb-2">
                         <div class="text-muted small">Wallet: Lightweight (signet)</div>
-                        <code><b>type=</b>wavelength;<b>store-id=</b>@storeId;<b>network=</b>signet</code>
+                        <code><b>type=</b>wavelength;<b>token=</b>@token;<b>network=</b>signet</code>
                     </li>
                     <li class="mb-2">
                         <div class="text-muted small">Wallet: Neutrino</div>
-                        <code><b>type=</b>wavelength;<b>store-id=</b>@storeId;<b>wallet.type=</b>btcwallet</code>
+                        <code><b>type=</b>wavelength;<b>token=</b>@token;<b>wallet.type=</b>btcwallet</code>
                     </li>
                 </ul>
                 <p class="my-2">
-                    Besides <code>store-id</code>, any flag <code>waved</code> itself accepts can be added the
+                    This token is unique to this store - do not share it or reuse it for another store, and
+                    generate a fresh connection string here if you ever need to move this wallet.
+                </p>
+                <p class="my-2">
+                    Besides <code>token</code>, any flag <code>waved</code> itself accepts can be added the
                     same way - e.g. <code>network</code>, <code>wallet.esploraurl</code>, <code>server.host</code>.
                     They're passed straight through as <code>--flag value</code> on this store's <code>waved</code>
                     process. A handful of flags (<code>datadir</code>, <code>rpc.listenaddr</code>,

@@ -18,6 +18,7 @@ public sealed class WavelengthLightningClient(
     WavedProcessManager processManager,
     Network network,
     string storeId,
+    string token,
     IReadOnlyDictionary<string, string> extraFlags) : ILightningClient
 {
     private async Task<WalletServiceClient> EnsureReadyAsync(CancellationToken cancellation)
@@ -201,8 +202,12 @@ public sealed class WavelengthLightningClient(
 
     public override string ToString()
     {
+        // Echoes the exact token this client was actually constructed with, not a freshly
+        // re-encrypted one - Data Protection's Protect() isn't guaranteed to produce the same
+        // output twice for the same input, so re-deriving here would show a different-looking
+        // (though equally valid) string than what's actually saved.
         var extra = string.Concat(extraFlags.Select(kv => $";{kv.Key}={kv.Value}"));
-        return $"type=wavelength;store-id={storeId}{extra}";
+        return $"type=wavelength;token={token}{extra}";
     }
 
     private static LightningInvoice ToLightningInvoice(WalletEntry entry) => new()

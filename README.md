@@ -42,16 +42,22 @@ listens on loopback starting at port `10029`, and defaults to `mainnet`.
 ### Connect a store to Wavelength
 
 On a store's **Lightning → Setup Lightning Node** page, open the "Custom Node" section and expand
-the **Wavelength** entry for ready-made connection string samples, e.g.:
+the **Wavelength** entry for ready-made connection string samples, pre-filled with a token unique
+to that store, e.g.:
 
 ```
-type=wavelength;store-id=<your store's ID>
-type=wavelength;store-id=<your store's ID>;network=signet
-type=wavelength;store-id=<your store's ID>;wallet.type=btcwallet
+type=wavelength;token=<generated for this store>
+type=wavelength;token=<generated for this store>;network=signet
+type=wavelength;token=<generated for this store>;wallet.type=btcwallet
 ```
+
+That token isn't the store's BTCPay ID - it's an opaque value encrypted with BTCPay's own key
+ring, so reaching a store's `waved` instance requires having actually seen that specific store's
+generated connection string, not just knowing its ID (which is often visible to anyone with even
+minor access to a store). Don't share it or reuse it for another store.
 
 Wavelength can run with a Lightweight (`lwwallet`), Neutrino (`btcwallet`), or LND wallet backend,
-on `mainnet`, `signet`, `testnet`, `simnet`, or `regtest`. Besides `store-id`, any flag `waved`
+on `mainnet`, `signet`, `testnet`, `simnet`, or `regtest`. Besides `token`, any flag `waved`
 itself accepts can be added the same way (e.g. `network`, `wallet.esploraurl`, `server.host`) and
 is passed straight through as `--flag value` to that store's `waved` process. A handful of flags
 (`datadir`, `rpc.listenaddr`, `wallet.password_file`, `rpc.notls`, `rpc.no-macaroons`,

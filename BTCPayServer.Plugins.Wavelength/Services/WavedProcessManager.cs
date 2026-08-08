@@ -406,11 +406,14 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
             // default means it auto-generates a self-signed TLS cert and an instance-scoped
             // admin macaroon under this store's own datadir on first start (see
             // BuildSecureChannel below), which this plugin then pins/attaches on every call. That
-            // gives a real authentication boundary enforced by waved itself: even a bug in this
-            // plugin's own store->port routing, or a connection string referencing the wrong
-            // store-id, would be rejected by waved rather than just relying on our own
-            // bookkeeping being correct. WavedReservedFlags still blocks a connection string from
-            // setting either flag, so a store owner can't weaken this back down.
+            // gives a real authentication boundary enforced by waved itself, independent of this
+            // plugin's own bookkeeping: if a channel ever ended up talking to the wrong OS
+            // process (e.g. a routing/port-reuse bug), the pinned cert wouldn't match and the
+            // wrong macaroon would be rejected. It does NOT, on its own, stop a connection string
+            // from correctly and legitimately being told to reach a different store's instance -
+            // that's WavedStoreTokenProtector's job (see WavelengthLightningConnectionStringHandler),
+            // a separate, complementary layer. WavedReservedFlags still blocks a connection string
+            // from disabling rpc.notls/rpc.no-macaroons, so a store owner can't weaken this back down.
 
             var startInfo = new ProcessStartInfo
             {
