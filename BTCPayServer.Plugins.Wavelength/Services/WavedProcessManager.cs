@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography.X509Certificates;
 using BTCPayServer.Events;
 using BTCPayServer.Services.Stores;
 using Google.Protobuf;
@@ -82,10 +84,9 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
 
     /// <summary>
     /// Returns a WalletService client bound to this store's waved instance, or null if it isn't
-    /// running. The channel is plaintext gRPC (h2c) - waved is started with --rpc.notls
-    /// --rpc.no-macaroons and only ever binds to loopback, so this is only safe because the
-    /// connection never leaves the host. See WavelengthPlugin.Execute for the AppContext switch
-    /// that enables unencrypted HTTP/2 on the client side.
+    /// running. The channel is TLS with waved's own auto-generated per-store cert pinned, plus
+    /// that instance's own admin macaroon attached on every call - see BuildSecureChannel. Only
+    /// ever binds to loopback regardless.
     /// </summary>
     public WalletServiceClient? GetWalletClient(string storeId)
         => _stores.TryGetValue(storeId, out var sp) ? new WalletServiceClient(sp.Channel) : null;
@@ -374,12 +375,13 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         var passwordFilePath = WritePasswordFile(dataDir, password);
 
         var port = ReserveFreePort();
-        var uri = new Uri($"http://{_config.Host}:{port}");
+        var uri = new Uri($"https://{_config.Host}:{port}");
         var wavedPath = ResolveBinaryPath("waved");
 
         Process process;
         List<string> startupStderr;
         string flagsLog;
+        string network;
         try
         {
             // Server-wide default first, then whatever the store's connection string actually
@@ -398,13 +400,17 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
             flags["datadir"] = dataDir;
             flags["rpc.listenaddr"] = $"{_config.Host}:{port}";
             flags["wallet.password_file"] = passwordFilePath;
-            // waved is only ever bound to loopback and only ever talked to by this plugin, so
-            // plaintext RPC is acceptable here - a macaroon can't ride an unencrypted connection,
-            // so these two flags must be passed together (see wavelength's INSTALL.md). Actual
-            // flag names are rpc.notls / rpc.no-macaroons (waved/config.go mapstructure tags) -
-            // NOT --no-tls/--no-macaroons, which waved rejects outright ("unknown flag").
-            flags["rpc.notls"] = null;
-            flags["rpc.no-macaroons"] = null;
+            network = flags["network"]!;
+
+            // Deliberately NOT setting rpc.notls/rpc.no-macaroons - leaving both at waved's
+            // default means it auto-generates a self-signed TLS cert and an instance-scoped
+            // admin macaroon under this store's own datadir on first start (see
+            // BuildSecureChannel below), which this plugin then pins/attaches on every call. That
+            // gives a real authentication boundary enforced by waved itself: even a bug in this
+            // plugin's own store->port routing, or a connection string referencing the wrong
+            // store-id, would be rejected by waved rather than just relying on our own
+            // bookkeeping being correct. WavedReservedFlags still blocks a connection string from
+            // setting either flag, so a store owner can't weaken this back down.
 
             var startInfo = new ProcessStartInfo
             {
@@ -447,11 +453,6 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
-            // GrpcChannel.ForAddress doesn't connect eagerly - the actual connection attempt
-            // happens on the first RPC call, by which point WaitForReadyAsync below has confirmed
-            // the port is accepting connections.
-            var channel = GrpcChannel.ForAddress(uri, new GrpcChannelOptions { Credentials = ChannelCredentials.Insecure });
-            _stores[storeId] = new StoreProcess(process, uri, port, channel, extraFlags);
             flagsLog = string.Join(' ', flags.Select(kv => kv.Value is null ? $"--{kv.Key}" : $"--{kv.Key}={kv.Value}"))
                 + " --rpc.gateway.enabled=false";
         }
@@ -465,9 +466,77 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
             throw;
         }
 
-        await WaitForReadyAsync(storeId, process, _config.Host, port, startupStderr, cancellationToken);
+        try
+        {
+            await WaitForReadyAsync(storeId, process, _config.Host, port, startupStderr, cancellationToken);
+
+            // Only safe to read here, not any earlier: waved writes its TLS cert and macaroon
+            // during its own RPC bootstrap, strictly before it starts listening - WaitForReadyAsync
+            // succeeding is exactly the signal that both are already on disk.
+            var channel = BuildSecureChannel(dataDir, network, uri);
+            _stores[storeId] = new StoreProcess(process, uri, port, channel, extraFlags);
+        }
+        catch
+        {
+            // WaitForReadyAsync's own "process exited" branch already handles cleanup for that
+            // specific case (there's nothing in _stores yet either way, so its TryRemove there is
+            // always a no-op now - the channel doesn't exist until this try block's second line).
+            // This catch additionally covers BuildSecureChannel itself failing (a missing/malformed
+            // cert or macaroon) after the process came up healthy, where nothing else would kill it
+            // or free the port. ReleasePort tolerates being called twice.
+            if (!process.HasExited)
+                await TerminateProcessAsync(process);
+            ReleasePort(port);
+            throw;
+        }
 
         _logger.LogInformation("Started waved for store {StoreId} on port {Port} with flags: {Flags}", storeId, port, flagsLog);
+    }
+
+    /// <summary>
+    /// Builds the gRPC channel for one store's waved instance, pinned to the exact self-signed
+    /// TLS cert waved auto-generated under this store's own network-scoped datadir, with its
+    /// instance-scoped admin macaroon attached as a "macaroon" metadata header on every call -
+    /// matching waved's own client convention (rpcauth.DialOptionFromFile in the wavelength repo)
+    /// exactly. Pinning the specific cert bytes (rather than normal CA-chain validation, which
+    /// would reject any self-signed cert, or disabling validation entirely, which would throw away
+    /// the whole point of this) means a connection can only succeed against the one waved process
+    /// that generated this exact cert+macaroon pair - not merely whatever happens to be listening
+    /// on this port.
+    /// </summary>
+    private static GrpcChannel BuildSecureChannel(string dataDir, string network, Uri uri)
+    {
+        var networkDir = Path.Combine(dataDir, "data", network);
+        // Cert-only overload deliberately: waved writes cert and key to separate files
+        // (tls.cert/tls.key - see rpcauth/tls.go's WriteCertPair), and CreateFromPemFile's
+        // single-argument form doesn't mean "no key" - it means "look for one in this same
+        // file," which throws when it finds none. We only ever pin/compare this certificate's
+        // public bytes against what the server presents, never use it for client auth, so the
+        // private key was never needed here in the first place.
+        var pinnedCert = X509Certificate2.CreateFromPem(File.ReadAllText(Path.Combine(networkDir, "tls.cert")));
+        var macaroonHex = Convert.ToHexString(File.ReadAllBytes(Path.Combine(networkDir, "admin.macaroon")));
+
+        var httpHandler = new SocketsHttpHandler
+        {
+            SslOptions = new SslClientAuthenticationOptions
+            {
+                RemoteCertificateValidationCallback = (_, certificate, _, _) =>
+                    certificate is X509Certificate2 presented
+                    && presented.RawData.AsSpan().SequenceEqual(pinnedCert.RawData)
+            }
+        };
+
+        var macaroonCredentials = CallCredentials.FromInterceptor((_, metadata) =>
+        {
+            metadata.Add("macaroon", macaroonHex);
+            return Task.CompletedTask;
+        });
+
+        return GrpcChannel.ForAddress(uri, new GrpcChannelOptions
+        {
+            HttpHandler = httpHandler,
+            Credentials = ChannelCredentials.Create(new SslCredentials(), macaroonCredentials)
+        });
     }
 
     /// <summary>

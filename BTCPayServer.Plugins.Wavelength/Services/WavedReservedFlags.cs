@@ -14,18 +14,24 @@ public static class WavedReservedFlags
         // whole point of one waved instance per store (see WavedProcessManager's doc comment).
         "datadir",
 
-        // The plaintext gRPC channel (no TLS) is only safe because this is always loopback -
-        // see WavelengthPlugin.Execute's AppContext switch and GetWalletClient's doc comment.
+        // The channel is always loopback, but that alone is no longer the only thing keeping it
+        // safe - see rpc.notls/rpc.no-macaroons below.
         "rpc.listenaddr",
 
         // Must point at the file WavedWalletCredentialStore's password is written to, or
         // auto-unlock breaks and every restart needs a manual UnlockWallet RPC.
         "wallet.password_file",
 
-        // Paired together intentionally for the loopback-only internal channel; see
-        // wavelength's INSTALL.md ("a macaroon can't ride an unencrypted connection"). Actual
-        // waved flag names are rpc.notls / rpc.no-macaroons (confirmed from waved/config.go's
-        // mapstructure tags) - not the --no-tls/--no-macaroons shorthand INSTALL.md's prose uses.
+        // Deliberately left at waved's default (both enabled) rather than passed at all - see
+        // WavedProcessManager.StartStoreAsync/BuildSecureChannel for why: waved auto-generates a
+        // self-signed TLS cert and an instance-scoped admin macaroon per store, which this plugin
+        // pins/attaches on every call, so a request can only succeed against the exact waved
+        // process that generated that pair - a real authentication boundary enforced by waved
+        // itself, not just this plugin's own store->port bookkeeping. Reserved here so a
+        // connection string can't disable either and silently weaken that back down to the old
+        // plaintext/no-auth behavior. Actual waved flag names are rpc.notls / rpc.no-macaroons
+        // (confirmed from waved/config.go's mapstructure tags) - not the --no-tls/--no-macaroons
+        // shorthand wavelength's INSTALL.md prose uses.
         "rpc.notls",
         "rpc.no-macaroons",
 
