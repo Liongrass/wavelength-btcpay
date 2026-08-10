@@ -6,7 +6,8 @@
       "WebSearch",
       "WebFetch(domain:api.github.com)",
       "WebFetch(domain:dev.blink.sv)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:docs.btcpayserver.org)"
     ]
   }
 }
