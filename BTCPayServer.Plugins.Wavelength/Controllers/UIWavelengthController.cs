@@ -15,7 +15,15 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace BTCPayServer.Plugins.Wavelength.Controllers;
 
-[Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie, Policy = Policies.CanViewStoreSettings)]
+// CanModifyStoreSettings, not CanViewStoreSettings, on every action here - including the
+// read-only ones (dashboard, VTXO list, mnemonic peek). This matches core's own Lightning
+// controller (UIStoresController.LightningLike.cs), which gates all of its actions, GET and
+// POST alike, behind CanModifyStoreSettings with no separate view-only tier - viewing a
+// Lightning node's state is treated as sensitive as changing it. The built-in Manager role
+// has CanViewStoreSettings but not CanModifyStoreSettings, so this also fixes a real gap:
+// without it, a Manager could reach Send/Delete (fund movement, wallet deletion) through
+// this plugin despite core denying Managers equivalent access to the real Lightning backend.
+[Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie, Policy = Policies.CanModifyStoreSettings)]
 [AutoValidateAntiforgeryToken]
 [Route("stores/{storeId}/plugins/wavelength")]
 public partial class UIWavelengthController(
