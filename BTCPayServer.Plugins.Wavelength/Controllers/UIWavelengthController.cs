@@ -4,6 +4,7 @@ using BTCPayServer.Client;
 using BTCPayServer.Data;
 using BTCPayServer.Payments;
 using BTCPayServer.Payments.Lightning;
+using BTCPayServer.Plugins.Wavelength.Lightning;
 using BTCPayServer.Plugins.Wavelength.Services;
 using BTCPayServer.Plugins.Wavelength.ViewModels;
 using BTCPayServer.Services.Invoices;
@@ -62,11 +63,26 @@ public partial class UIWavelengthController(
     /// letting the caller proceed into Send/Receive RPCs that would just fail. Returns null when
     /// it's safe to proceed.
     /// </summary>
-    private async Task<IActionResult?> RedirectIfNoWalletAsync(string storeId, CancellationToken cancellationToken)
+    private async Task<IActionResult?> RedirectIfNoWalletAsync(
+        string storeId, LightningPaymentMethodConfig wavelengthConfig, CancellationToken cancellationToken)
     {
+        // Re-parses the store's CURRENT connection string on every call, the same way the
+        // Advanced page's "Restart waved" button does - a first-ever start (or a restart after a
+        // crash/stop/delete) must pick up flags that were just saved, not stale ones from
+        // whenever EnsureStartedAsync last happened to be called with fresh flags. Before this,
+        // only an actual Lightning RPC (WavelengthLightningClient.EnsureReadyAsync) or that
+        // Restart button ever threaded live flags through - simply browsing this store's own
+        // Wavelength pages silently started/kept the process on stale or empty flags instead.
+        if (!WavelengthLightningConnectionStringHandler.TryParseExtraFlags(
+                wavelengthConfig.ConnectionString!, out var extraFlags, out var parseError))
+        {
+            TempData[WellKnownTempData.ErrorMessage] = parseError;
+            return RedirectToAction(nameof(Index), new { storeId });
+        }
+
         try
         {
-            await processManager.EnsureStartedAsync(storeId, cancellationToken: cancellationToken);
+            await processManager.EnsureStartedAsync(storeId, extraFlags, cancellationToken);
         }
         catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or RpcException)
         {

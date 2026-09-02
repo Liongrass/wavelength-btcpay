@@ -15,9 +15,10 @@ public partial class UIWavelengthController
     {
         var store = HttpContext.GetStoreDataOrNull();
         if (store is null) return NotFound();
-        if (GetWavelengthConfig(store) is null) return RedirectToLightningSetup(storeId);
+        var wavelengthConfig = GetWavelengthConfig(store);
+        if (wavelengthConfig is null) return RedirectToLightningSetup(storeId);
 
-        if (await RedirectIfNoWalletAsync(storeId, cancellationToken) is { } redirect)
+        if (await RedirectIfNoWalletAsync(storeId, wavelengthConfig, cancellationToken) is { } redirect)
             return redirect;
 
         var model = new WavelengthReceiveViewModel { StoreId = storeId };
@@ -30,7 +31,8 @@ public partial class UIWavelengthController
     {
         var store = HttpContext.GetStoreDataOrNull();
         if (store is null) return NotFound();
-        if (GetWavelengthConfig(store) is null) return RedirectToLightningSetup(storeId);
+        var wavelengthConfig = GetWavelengthConfig(store);
+        if (wavelengthConfig is null) return RedirectToLightningSetup(storeId);
 
         model.StoreId = storeId;
         model.Invoice = null;
@@ -66,7 +68,7 @@ public partial class UIWavelengthController
             return View(model);
         }
 
-        if (await RedirectIfNoWalletAsync(storeId, cancellationToken) is { } redirect)
+        if (await RedirectIfNoWalletAsync(storeId, wavelengthConfig, cancellationToken) is { } redirect)
             return redirect;
 
         var wallet = processManager.GetWalletClient(storeId);

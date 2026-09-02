@@ -1,4 +1,5 @@
 using BTCPayServer.Abstractions.Constants;
+using BTCPayServer.Plugins.Wavelength.Lightning;
 using BTCPayServer.Plugins.Wavelength.ViewModels;
 using Grpc.Core;
 using Microsoft.AspNetCore.Mvc;
@@ -14,16 +15,28 @@ public partial class UIWavelengthController
     {
         var store = HttpContext.GetStoreDataOrNull();
         if (store is null) return NotFound();
-        if (GetWavelengthConfig(store) is null) return RedirectToLightningSetup(storeId);
+        var wavelengthConfig = GetWavelengthConfig(store);
+        if (wavelengthConfig is null) return RedirectToLightningSetup(storeId);
 
         // Visiting the dashboard counts as "first use" for lazy process start, same as any RPC
         // through WavelengthLightningClient - see WavedProcessManager.EnsureStartedAsync. A
         // failure to start (bad flags, waved crashed, etc.) must never bubble up past this
         // action - it would 500 the whole request instead of showing what actually went wrong.
         // Starting the process is NOT the same as creating a wallet - see the check below.
+        //
+        // Flags are re-parsed from the CURRENT connection string here (not passed as null) so a
+        // first-ever start (or a restart after a crash/stop/delete) picks up whatever was just
+        // saved on the Lightning setup page - see RedirectIfNoWalletAsync's doc comment for why
+        // that matters.
+        if (!WavelengthLightningConnectionStringHandler.TryParseExtraFlags(
+                wavelengthConfig.ConnectionString!, out var extraFlags, out var parseError))
+        {
+            return View(new WavelengthWalletViewModel { StoreId = storeId, IsRunning = false, StartupError = parseError });
+        }
+
         try
         {
-            await processManager.EnsureStartedAsync(storeId, cancellationToken: cancellationToken);
+            await processManager.EnsureStartedAsync(storeId, extraFlags, cancellationToken);
         }
         catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or RpcException)
         {
@@ -108,11 +121,19 @@ public partial class UIWavelengthController
     {
         var store = HttpContext.GetStoreDataOrNull();
         if (store is null) return NotFound();
-        if (GetWavelengthConfig(store) is null) return RedirectToLightningSetup(storeId);
+        var wavelengthConfig = GetWavelengthConfig(store);
+        if (wavelengthConfig is null) return RedirectToLightningSetup(storeId);
+
+        if (!WavelengthLightningConnectionStringHandler.TryParseExtraFlags(
+                wavelengthConfig.ConnectionString!, out var extraFlags, out var parseError))
+        {
+            TempData[WellKnownTempData.ErrorMessage] = parseError;
+            return RedirectToAction(nameof(Index), new { storeId });
+        }
 
         try
         {
-            await processManager.EnsureStartedAsync(storeId, cancellationToken: cancellationToken);
+            await processManager.EnsureStartedAsync(storeId, extraFlags, cancellationToken);
         }
         catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or RpcException)
         {

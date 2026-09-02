@@ -17,9 +17,10 @@ public partial class UIWavelengthController
     {
         var store = HttpContext.GetStoreDataOrNull();
         if (store is null) return NotFound();
-        if (GetWavelengthConfig(store) is null) return RedirectToLightningSetup(storeId);
+        var wavelengthConfig = GetWavelengthConfig(store);
+        if (wavelengthConfig is null) return RedirectToLightningSetup(storeId);
 
-        if (await RedirectIfNoWalletAsync(storeId, cancellationToken) is { } redirect)
+        if (await RedirectIfNoWalletAsync(storeId, wavelengthConfig, cancellationToken) is { } redirect)
             return redirect;
 
         var vm = new WavelengthVtxosViewModel { StoreId = storeId, IsRunning = true };
@@ -89,7 +90,8 @@ public partial class UIWavelengthController
     {
         var store = HttpContext.GetStoreDataOrNull();
         if (store is null) return NotFound();
-        if (GetWavelengthConfig(store) is null) return RedirectToLightningSetup(storeId);
+        var wavelengthConfig = GetWavelengthConfig(store);
+        if (wavelengthConfig is null) return RedirectToLightningSetup(storeId);
 
         if (outpoints is null || outpoints.Length == 0)
         {
@@ -97,7 +99,7 @@ public partial class UIWavelengthController
             return RedirectToAction(nameof(Vtxos), new { storeId });
         }
 
-        if (await RedirectIfNoWalletAsync(storeId, cancellationToken) is { } redirect)
+        if (await RedirectIfNoWalletAsync(storeId, wavelengthConfig, cancellationToken) is { } redirect)
             return redirect;
 
         var vm = new WavelengthExitPlanViewModel { StoreId = storeId };
