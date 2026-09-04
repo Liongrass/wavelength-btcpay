@@ -37,6 +37,25 @@ Upload that file as described below.
 By default, each store's `waved` data lives under `<BTCPay data dir>/Plugins/Wavelength/stores/`,
 listens on loopback starting at port `10029`, and defaults to `mainnet`.
 
+### Backing up or migrating this instance
+
+Each store's wallet-unlock password and each connection string's token are encrypted with
+BTCPay's own ASP.NET Core Data Protection key ring, not with anything this plugin manages itself.
+**Back up and restore BTCPay's `DataProtection-Keys` directory alongside its database** — moving
+only the database (a common mistake with container/volume-based backups) leaves that key ring
+behind, and a fresh one can't decrypt what an old one encrypted.
+
+If that ever happens anyway, a store whose password can no longer be decrypted still recovers
+automatically the next time its `waved` process starts, *as long as its `wallet_password` file on
+disk is still intact* — that file was never protected by the key ring to begin with, so this
+plugin falls back to it and re-encrypts it under whatever key ring is active now. A store's
+connection string token has no equivalent fallback, though: if its key ring is truly gone, the
+token is unrecoverable and that store's Lightning setup page needs a fresh connection string
+generated and saved. There is also no way to rotate a single store's token in isolation short of
+rotating the instance's entire key ring - which would break every other store's token and
+password the same way. Treat a leaked connection string as a leaked credential for that store, not
+something you can individually revoke.
+
 ## Using it
 
 ### Connect a store to Wavelength

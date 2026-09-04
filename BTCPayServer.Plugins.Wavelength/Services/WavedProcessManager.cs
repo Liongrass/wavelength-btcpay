@@ -298,7 +298,21 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
                         continue;
                     }
 
-                    await EnsureStartedAsync(storeId, cancellationToken: stoppingToken);
+                    try
+                    {
+                        await EnsureStartedAsync(storeId, cancellationToken: stoppingToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        // One store failing to start here (e.g. WavedWalletCredentialStore
+                        // couldn't decrypt its password and no on-disk fallback was available
+                        // either) must not abort this loop for every store enumerated after it -
+                        // without this, a single broken store silently skips the startup pre-warm
+                        // for all the rest, which then only start lazily on their own next real
+                        // visit. This store itself stays broken until its password is fixed; that
+                        // failure just no longer takes its neighbors down with it.
+                        _logger.LogError(ex, "Failed to start waved for store {StoreId} during startup", storeId);
+                    }
                 }
             }
 
@@ -371,7 +385,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         // ignores it when there's nothing to auto-unlock (see waved/server.go's "no wallet
         // found, awaiting InitWallet RPC" path). We still need the same password in hand below
         // to actually call Create on first boot.
-        var password = await _credentialStore.GetOrCreatePasswordAsync(storeId, cancellationToken);
+        var password = await _credentialStore.GetOrCreatePasswordAsync(storeId, dataDir, cancellationToken);
         var passwordFilePath = WritePasswordFile(dataDir, password);
 
         var port = ReserveFreePort();
@@ -680,7 +694,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
 
         using var cts = new CancellationTokenSource(CreateWalletTimeout);
 
-        var password = await _credentialStore.GetOrCreatePasswordAsync(storeId, cts.Token);
+        var password = await _credentialStore.GetOrCreatePasswordAsync(storeId, _config.GetStoreDataDir(storeId), cts.Token);
 
         _logger.LogInformation("Creating wallet for store {StoreId}", storeId);
         try
@@ -783,7 +797,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
 
     private static string WritePasswordFile(string dataDir, string password)
     {
-        var path = Path.Combine(dataDir, "wallet_password");
+        var path = Path.Combine(dataDir, WavedWalletCredentialStore.PasswordFileName);
         File.WriteAllText(path, password);
         if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
