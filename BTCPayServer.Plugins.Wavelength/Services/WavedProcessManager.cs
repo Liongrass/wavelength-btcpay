@@ -475,7 +475,14 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
-            flagsLog = string.Join(' ', flags.Select(kv => kv.Value is null ? $"--{kv.Key}" : $"--{kv.Key}={kv.Value}"))
+            // Redacted for the log line only - startInfo.ArgumentList above already got the real
+            // values, waved needs those. wallet.esploraurl/wallet.feeurl are on WavedAllowedFlags
+            // specifically because a store owner might legitimately point them at a private,
+            // credentialed endpoint (https://user:pass@host/...) - Information-level logging is
+            // BTCPay's default, so logging that verbatim would put it in ordinary production logs.
+            flagsLog = string.Join(' ', flags.Select(kv => kv.Value is null
+                    ? $"--{kv.Key}"
+                    : $"--{kv.Key}={RedactUserInfo(kv.Value)}"))
                 + " --rpc.gateway.enabled=false";
         }
         catch
@@ -924,6 +931,16 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
 
     private string ResolveBinaryPath(string binaryName)
         => Path.Combine(_nativeDir, GetRuntimeIdentifier(), binaryName);
+
+    // Generic on purpose: rather than hardcoding "wallet.esploraurl/wallet.feeurl are the
+    // sensitive keys" (a list that goes stale the moment WavedAllowedFlags grows another
+    // URL-shaped flag), this scrubs embedded HTTP basic-auth credentials from ANY flag value that
+    // happens to parse as one - a no-op for every non-URL or credential-free value. Internal (not
+    // private) so WavedProcessManagerTests can exercise it directly.
+    internal static string RedactUserInfo(string value)
+        => Uri.TryCreate(value, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.UserInfo)
+            ? new UriBuilder(uri) { UserName = "***", Password = "" }.Uri.ToString()
+            : value;
 
     private void LogOutput(string storeId, string? data, bool isError)
     {
