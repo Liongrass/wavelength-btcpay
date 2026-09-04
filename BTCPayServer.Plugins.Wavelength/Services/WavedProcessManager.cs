@@ -381,6 +381,19 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         var dataDir = _config.GetStoreDataDir(storeId);
         Directory.CreateDirectory(dataDir);
 
+        // Directory.CreateDirectory only inherits the process umask (typically 0755) - readable
+        // and listable by anyone on the host. waved's own auth files (TLS key, macaroon) and
+        // wallet_password already land 0600/0700 individually, but the wallet DB itself may not -
+        // locking the directory down to owner-only here is defense in depth regardless of what
+        // mode any single file inside it ends up with. Reapplied unconditionally, not just on
+        // first creation, so a backup/restore tool that resets permissions gets silently
+        // corrected on this store's next start rather than staying wrong indefinitely.
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+        {
+            File.SetUnixFileMode(dataDir,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
         // Written unconditionally, even for a brand-new store with no wallet yet: waved simply
         // ignores it when there's nothing to auto-unlock (see waved/server.go's "no wallet
         // found, awaiting InitWallet RPC" path). We still need the same password in hand below
