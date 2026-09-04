@@ -61,7 +61,10 @@ on `mainnet`, `signet`, `testnet`, `simnet`, or `regtest`. Besides `token`, any 
 itself accepts can be added the same way (e.g. `network`, `wallet.esploraurl`, `server.host`) and
 is passed straight through as `--flag value` to that store's `waved` process. A handful of flags
 (`datadir`, `rpc.listenaddr`, `wallet.password_file`, `rpc.notls`, `rpc.no-macaroons`,
-`rpc.gateway.enabled`, `rpc.gateway.listenaddr`) are managed by the plugin and can't be overridden.
+`rpc.gateway.enabled`, `rpc.gateway.listenaddr`, `rpc.tlscertpath`, `rpc.tlskeypath`,
+`rpc.macaroonpath`, `server.macaroonpath`, `lnd.macaroonpath`) are managed by the plugin and can't
+be overridden (the last two would otherwise let a connection string make a store's `waved`
+instance read an arbitrary file on the server and leak it to an attacker-controlled host).
 
 **Before switching a store's wallet backend or network, delete its existing wallet first** —
 `waved` can't switch backend or network on an existing wallet in place. Changing flags on an

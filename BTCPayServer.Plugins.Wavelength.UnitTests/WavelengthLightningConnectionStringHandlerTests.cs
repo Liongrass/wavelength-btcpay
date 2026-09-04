@@ -62,6 +62,16 @@ public class WavelengthLightningConnectionStringHandlerTests
     [InlineData("wallet.password_file")]
     [InlineData("rpc.notls")]
     [InlineData("rpc.no-macaroons")]
+    [InlineData("rpc.gateway.enabled")]
+    [InlineData("rpc.gateway.listenaddr")]
+    [InlineData("rpc.tlscertpath")]
+    [InlineData("rpc.tlskeypath")]
+    [InlineData("rpc.macaroonpath")]
+    // The two that matter most: without these, a connection string could make this store's waved
+    // instance read an arbitrary file on the server (e.g. another store's admin.macaroon) and
+    // leak it to a host the same connection string also controls - see WavedReservedFlags.
+    [InlineData("server.macaroonpath")]
+    [InlineData("lnd.macaroonpath")]
     public void RejectsReservedFlagKeys(string reservedKey)
     {
         // Unlike RequiresToken/RejectsInvalidToken, this one needs a real, validly-protected

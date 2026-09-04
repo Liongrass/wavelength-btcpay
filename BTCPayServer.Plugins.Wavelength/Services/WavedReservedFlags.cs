@@ -42,5 +42,30 @@ public static class WavedReservedFlags
         // also allocating and tracking a second port per store.
         "rpc.gateway.enabled",
         "rpc.gateway.listenaddr",
+
+        // Redirect this store's own RPC TLS cert/key or admin macaroon away from the
+        // network-datadir location BuildSecureChannel hardcodes reading from (see
+        // WavedProcessManager.StartStoreAsync), and this plugin's own pinning check either reads
+        // stale/attacker-influenced material or throws trying to read a file waved never wrote.
+        // No legitimate BTCPay-managed store ever needs to set these - this plugin generates and
+        // consumes both itself. Same rationale as rpc.notls/rpc.no-macaroons above.
+        "rpc.tlscertpath",
+        "rpc.tlskeypath",
+        "rpc.macaroonpath",
+
+        // Arbitrary-file-read-and-exfiltrate primitive, confirmed against waved's source
+        // (outbound_clients.go's operatorRESTOptions/rpcauth.HexFromFile does a raw os.ReadFile
+        // of whatever path is given here, hex-encodes it, and attaches it as the "macaroon"
+        // header on every outbound ArkService/MailboxService request to server.host - which the
+        // SAME connection string also controls). A malicious store owner could point this at
+        // another store's admin.macaroon (or any other file this OS user can read) and
+        // server.host at their own server to steal it - the request fires automatically right
+        // after wallet unlock (waved/server.go's connectAndBootstrapMailbox), no further action
+        // needed beyond creating the wallet or restarting waved. lnd.macaroonpath is the same
+        // shape for the lnd wallet backend (read, then attached as the lnd gRPC macaroon against
+        // lnd.host). Neither has any legitimate use for a BTCPay-managed store - this plugin
+        // never exposes an "operator" or "lnd node" macaroon concept to store owners at all.
+        "server.macaroonpath",
+        "lnd.macaroonpath",
     };
 }

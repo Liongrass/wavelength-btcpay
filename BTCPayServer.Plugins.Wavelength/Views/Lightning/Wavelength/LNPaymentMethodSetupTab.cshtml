@@ -67,9 +67,12 @@
                     They're passed straight through as <code>--flag value</code> on this store's <code>waved</code>
                     process. A handful of flags (<code>datadir</code>, <code>rpc.listenaddr</code>,
                     <code>wallet.password_file</code>, <code>rpc.notls</code>, <code>rpc.no-macaroons</code>,
-                    <code>rpc.gateway.enabled</code>, <code>rpc.gateway.listenaddr</code>) are managed by the plugin
-                    and cannot be overridden here. Changing flags on an already-running store takes effect on its
-                    next restart, not immediately.
+                    <code>rpc.gateway.enabled</code>, <code>rpc.gateway.listenaddr</code>, <code>rpc.tlscertpath</code>,
+                    <code>rpc.tlskeypath</code>, <code>rpc.macaroonpath</code>, <code>server.macaroonpath</code>,
+                    <code>lnd.macaroonpath</code>) are managed by the plugin and cannot be overridden here (the
+                    last two would otherwise let a connection string make this store's waved instance read an
+                    arbitrary file on this server and leak it to a host you also control). Changing flags on an
+                    already-running store takes effect on its next restart, not immediately.
                 </p>
                 <!-- TODO: link to a Wavelength settings/setup page once one exists, mirroring
                      bark-btcpay's "Bark settings" link, so users can initialize/back up the
