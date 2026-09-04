@@ -60,6 +60,20 @@ public sealed class WavelengthLightningClient(
 
         // entry.Id is the Lightning payment hash for swap-backed receive rows (see
         // WalletEntry.id doc comment in wallet.proto) - no BOLT11 parsing needed to recover it.
+        //
+        // ExpiresAt, however, DOES need the BOLT11 parsed: RecvRequest has no expiry field at
+        // all (wallet.proto's own doc comment on the Recv RPC says the swap subsystem "owns...
+        // receive expiry", not something this call can ask for or even observe otherwise), so
+        // echoing back "now + whatever expiry BTCPay requested" would just be a fabrication - if
+        // the swap subsystem's real expiry runs longer (nothing here controls or even knows
+        // whether it matches), a customer could still pay this exact BOLT11 after BTCPay has
+        // already written the invoice off as expired, landing funds nobody's expecting on it.
+        // Falling back to the requested-expiry guess only if the invoice fails to parse (should
+        // never happen for a BOLT11 waved itself just generated) keeps this from ever throwing.
+        var expiresAt = BOLT11PaymentRequest.TryParse(response.Invoice, out var bolt11, network)
+            ? bolt11!.ExpiryDate
+            : DateTimeOffset.UtcNow + createInvoiceRequest.Expiry;
+
         return new LightningInvoice
         {
             Id = response.Entry.Id,
@@ -67,7 +81,7 @@ public sealed class WavelengthLightningClient(
             BOLT11 = response.Invoice,
             PaymentHash = response.Entry.Id,
             Status = LightningInvoiceStatus.Unpaid,
-            ExpiresAt = DateTimeOffset.UtcNow + createInvoiceRequest.Expiry
+            ExpiresAt = expiresAt
         };
     }
 
