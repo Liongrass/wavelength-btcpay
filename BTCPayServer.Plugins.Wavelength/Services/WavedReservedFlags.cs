@@ -47,11 +47,51 @@ public static class WavedReservedFlags
         // network-datadir location BuildSecureChannel hardcodes reading from (see
         // WavedProcessManager.StartStoreAsync), and this plugin's own pinning check either reads
         // stale/attacker-influenced material or throws trying to read a file waved never wrote.
-        // No legitimate BTCPay-managed store ever needs to set these - this plugin generates and
-        // consumes both itself. Same rationale as rpc.notls/rpc.no-macaroons above.
+        // Confirmed against waved's source that these are real MkdirAll+write primitives at
+        // whatever path is given (rpcauth/tls.go's EnsureTLSCert, waved/rpc_security.go's
+        // macaroon service + bakeReadOnlyMacaroon) - pointed at another store's datadir, this
+        // could corrupt that store's own cert/macaroon files, or write into any other directory
+        // this OS user can create/write to. No legitimate BTCPay-managed store ever needs to set
+        // these - this plugin generates and consumes both itself. Same rationale as
+        // rpc.notls/rpc.no-macaroons above.
         "rpc.tlscertpath",
         "rpc.tlskeypath",
         "rpc.macaroonpath",
+
+        // Same MkdirAll-then-write-at-arbitrary-path shape as rpc.tlscertpath/etc. above, minus
+        // the auth angle: waved MkdirAll's this path and appends to a fixed-name log file there
+        // (cmd/waved/main.go's configureDaemonLogWriter), with some attacker-influenced content
+        // (memos, error text) ending up in it. No legitimate use for a BTCPay-managed store -
+        // datadir already owns where this store's own logs live.
+        "logdir",
+
+        // Absolute-path override for the daemon-owned swap SQLite DB, confirmed in
+        // swapclientserver/service.go: when set, it's used verbatim instead of the
+        // NetworkDir()-scoped default. Point two stores at the same file and their swap
+        // executors share (and corrupt) one SQLite DB tracking in-flight swap state - a real
+        // fund-tracking risk, not just a config error.
+        "swap.databasefilename",
+
+        // BtcwalletDataDir is a datadir-relocation primitive for neutrino's chain data, same
+        // class as logdir/datadir above - no legitimate reason to move just this subtree
+        // elsewhere. BtcwBlockSource/BtcwFilterSource are documented in waved's own config.go as
+        // "a local file path or HTTP(S) URL that neutrino imports [block/filter] headers from on
+        // startup" - an arbitrary-local-file-import primitive with no legitimate use for a
+        // BTCPay-managed store (this is a wavelength dev/regtest chain-seeding feature).
+        "wallet.btcwallet_datadir",
+        "wallet.btcwallet_blockheaderssource",
+        "wallet.btcwallet_filterheaderssource",
+
+        // waved's own PprofConfig doc comment says it best: "pprof exposes sensitive runtime and
+        // debug data - goroutine stacks, heap and CPU profiles, the command line, and the symbol
+        // table - any of which can leak internal state or enable denial-of-service... Operators
+        // who enable it should bind ListenAddr to a loopback or firewalled address and never
+        // expose it to untrusted networks." A wallet process's heap can contain seed/password/
+        // macaroon material. metrics.listen binds a second, separate HTTP listener with the same
+        // "arbitrary bind address" shape (also usable for port-collision DoS against another
+        // store's own listeners). Neither has a legitimate use for a BTCPay-managed store.
+        "pprof.listen",
+        "metrics.listen",
 
         // Arbitrary-file-read-and-exfiltrate primitive, confirmed against waved's source
         // (outbound_clients.go's operatorRESTOptions/rpcauth.HexFromFile does a raw os.ReadFile

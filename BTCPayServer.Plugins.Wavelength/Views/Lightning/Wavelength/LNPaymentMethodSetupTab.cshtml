@@ -65,14 +65,19 @@
                     Besides <code>token</code>, any flag <code>waved</code> itself accepts can be added the
                     same way - e.g. <code>network</code>, <code>wallet.esploraurl</code>, <code>server.host</code>.
                     They're passed straight through as <code>--flag value</code> on this store's <code>waved</code>
-                    process. A handful of flags (<code>datadir</code>, <code>rpc.listenaddr</code>,
+                    process. A handful of flags are managed by the plugin and cannot be overridden here: the ones
+                    this store's isolation depends on (<code>datadir</code>, <code>rpc.listenaddr</code>,
                     <code>wallet.password_file</code>, <code>rpc.notls</code>, <code>rpc.no-macaroons</code>,
-                    <code>rpc.gateway.enabled</code>, <code>rpc.gateway.listenaddr</code>, <code>rpc.tlscertpath</code>,
-                    <code>rpc.tlskeypath</code>, <code>rpc.macaroonpath</code>, <code>server.macaroonpath</code>,
-                    <code>lnd.macaroonpath</code>) are managed by the plugin and cannot be overridden here (the
-                    last two would otherwise let a connection string make this store's waved instance read an
-                    arbitrary file on this server and leak it to a host you also control). Changing flags on an
-                    already-running store takes effect on its next restart, not immediately.
+                    <code>rpc.gateway.*</code>), plus every path- or listen-address-shaped flag that has no
+                    legitimate use from a store's own connection string (<code>logdir</code>,
+                    <code>rpc.tlscertpath</code>, <code>rpc.tlskeypath</code>, <code>rpc.macaroonpath</code>,
+                    <code>server.macaroonpath</code>, <code>lnd.macaroonpath</code>,
+                    <code>swap.databasefilename</code>, <code>wallet.btcwallet_datadir</code>,
+                    <code>wallet.btcwallet_blockheaderssource</code>, <code>wallet.btcwallet_filterheaderssource</code>,
+                    <code>pprof.listen</code>, <code>metrics.listen</code>) - several of those would otherwise let a
+                    connection string make this store's waved instance read or write an arbitrary file on this
+                    server, or expose a debug endpoint, rather than just configuring the wallet. Changing flags on
+                    an already-running store takes effect on its next restart, not immediately.
                 </p>
                 <!-- TODO: link to a Wavelength settings/setup page once one exists, mirroring
                      bark-btcpay's "Bark settings" link, so users can initialize/back up the

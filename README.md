@@ -60,11 +60,14 @@ Wavelength can run with a Lightweight (`lwwallet`), Neutrino (`btcwallet`), or L
 on `mainnet`, `signet`, `testnet`, `simnet`, or `regtest`. Besides `token`, any flag `waved`
 itself accepts can be added the same way (e.g. `network`, `wallet.esploraurl`, `server.host`) and
 is passed straight through as `--flag value` to that store's `waved` process. A handful of flags
+are managed by the plugin and can't be overridden: the ones this store's isolation depends on
 (`datadir`, `rpc.listenaddr`, `wallet.password_file`, `rpc.notls`, `rpc.no-macaroons`,
-`rpc.gateway.enabled`, `rpc.gateway.listenaddr`, `rpc.tlscertpath`, `rpc.tlskeypath`,
-`rpc.macaroonpath`, `server.macaroonpath`, `lnd.macaroonpath`) are managed by the plugin and can't
-be overridden (the last two would otherwise let a connection string make a store's `waved`
-instance read an arbitrary file on the server and leak it to an attacker-controlled host).
+`rpc.gateway.*`), plus every path- or listen-address-shaped flag with no legitimate use from a
+store's own connection string (`logdir`, `rpc.tlscertpath`, `rpc.tlskeypath`, `rpc.macaroonpath`,
+`server.macaroonpath`, `lnd.macaroonpath`, `swap.databasefilename`, `wallet.btcwallet_datadir`,
+`wallet.btcwallet_blockheaderssource`, `wallet.btcwallet_filterheaderssource`, `pprof.listen`,
+`metrics.listen`) - several of those would otherwise let a connection string make a store's
+`waved` instance read or write an arbitrary file on the server, or expose a debug endpoint.
 
 **Before switching a store's wallet backend or network, delete its existing wallet first** —
 `waved` can't switch backend or network on an existing wallet in place. Changing flags on an

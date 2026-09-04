@@ -72,6 +72,13 @@ public class WavelengthLightningConnectionStringHandlerTests
     // leak it to a host the same connection string also controls - see WavedReservedFlags.
     [InlineData("server.macaroonpath")]
     [InlineData("lnd.macaroonpath")]
+    [InlineData("logdir")]
+    [InlineData("swap.databasefilename")]
+    [InlineData("wallet.btcwallet_datadir")]
+    [InlineData("wallet.btcwallet_blockheaderssource")]
+    [InlineData("wallet.btcwallet_filterheaderssource")]
+    [InlineData("pprof.listen")]
+    [InlineData("metrics.listen")]
     public void RejectsReservedFlagKeys(string reservedKey)
     {
         // Unlike RequiresToken/RejectsInvalidToken, this one needs a real, validly-protected
