@@ -10,8 +10,8 @@ namespace BTCPayServer.Plugins.Wavelength.Lightning;
 /// <summary>
 /// ILightningClient backed by a per-store waved instance, talking to it over the vendored
 /// wavewalletrpc gRPC client (see Protos/ and scripts/check-proto-drift.sh). Scope mirrors
-/// bark-btcpay's BarkLightningClient: CreateInvoice/GetInvoice/Pay/GetBalance/Listen are
-/// implemented; wavelength is an Ark/Lightning-swap wallet with no channels, so
+/// bark-btcpay's BarkLightningClient: CreateInvoice/GetInvoice/Pay/GetPayment/GetBalance/Listen
+/// are implemented; wavelength is an Ark/Lightning-swap wallet with no channels, so
 /// OpenChannel/GetDepositAddress/ConnectTo/ListChannels stay NotSupported.
 /// </summary>
 public sealed class WavelengthLightningClient(
@@ -101,15 +101,38 @@ public sealed class WavelengthLightningClient(
         if (string.IsNullOrEmpty(bolt11))
             return new PayResponse(PayResult.Error, "BOLT11 invoice is required");
 
+        // PrepareSend is a local, no-funds-movement quote/intent step - wallet.proto's own doc
+        // comment on the Send RPC spells this out: "intentionally intent-only... funds move" only
+        // once Send is actually called. So a failure anywhere up to and including this call is
+        // always safe to report as a definitive, retry-safe Error - nothing has been dispatched
+        // yet, unlike everything from here on.
+        WalletServiceClient wallet;
+        PrepareSendResponse prepared;
         try
         {
-            var wallet = await EnsureReadyAsync(cancellation);
+            wallet = await EnsureReadyAsync(cancellation);
 
             var prepareRequest = new PrepareSendRequest { Invoice = bolt11 };
             if (payParams.Amount is { } amount)
                 prepareRequest.AmtSat = (ulong)amount.ToUnit(LightMoneyUnit.Satoshi);
 
-            var prepared = await wallet.PrepareSendAsync(prepareRequest, cancellationToken: cancellation);
+            prepared = await wallet.PrepareSendAsync(prepareRequest, cancellationToken: cancellation);
+        }
+        catch (RpcException ex)
+        {
+            return new PayResponse(PayResult.Error, ex.Status.Detail);
+        }
+
+        // From here on, a failure no longer means "nothing happened": Send actually dispatches
+        // the payment, so an exception now - including one from the terminal-state poll below,
+        // e.g. waved becoming Unavailable mid-restart - leaves the true outcome unknown; the send
+        // may already have gone through on waved's side even though this call never got to see
+        // it. Reporting Unknown (never Error) for every one of these ambiguous cases is what
+        // makes BTCPay core hand the payout to LightningPendingPayoutListener (which settles it
+        // later via GetPayment) instead of letting the automated payout processor retry - and
+        // possibly double-pay - a send that might already have succeeded.
+        try
+        {
             var sent = await wallet.SendAsync(
                 new SendRequest { SendIntentId = prepared.SendIntentId }, cancellationToken: cancellation);
 
@@ -126,15 +149,20 @@ public sealed class WavelengthLightningClient(
                         TotalAmount = LightMoney.Satoshis(sent.ActualAmountSat)
                     }
                 },
+                // waved itself reports this as definitively, terminally failed - the only other
+                // case (besides the PrepareSend failure above) where Error is correct here.
                 EntryStatus.Failed => new PayResponse(PayResult.Error,
                     string.IsNullOrEmpty(entry.FailureReason) ? "Payment failed" : entry.FailureReason),
-                _ => new PayResponse(PayResult.Error,
+                // Still pending after the poll window - genuinely unknown, not failed.
+                // GetPayment (keyed by this same entry.Id / payment hash) is how
+                // LightningPendingPayoutListener settles it once a terminal state exists.
+                _ => new PayResponse(PayResult.Unknown,
                     "Payment is still pending after 30s; check the store's activity history for its final status")
             };
         }
         catch (RpcException ex)
         {
-            return new PayResponse(PayResult.Error, ex.Status.Detail);
+            return new PayResponse(PayResult.Unknown, ex.Status.Detail);
         }
     }
 
@@ -174,8 +202,29 @@ public sealed class WavelengthLightningClient(
     public Task<LightningInvoice[]> ListInvoices(ListInvoicesParams request, CancellationToken cancellation = default)
         => throw new NotSupportedException();
 
-    public Task<LightningPayment> GetPayment(string paymentHash, CancellationToken cancellation = default)
-        => throw new NotSupportedException();
+    // The other half of the Pay()/PayResult.Unknown story: once a send's outcome is unknown,
+    // BTCPayServer.Payments.Lightning.LightningPendingPayoutListener polls this on a timer (keyed
+    // by the BOLT11's own payment hash) until it sees a terminal state. entry.Id IS that payment
+    // hash for every send this client ever creates - Pay() only ever dispatches invoice sends,
+    // and wallet.proto's WalletEntry.id doc comment says swap-backed SEND rows use the payment
+    // hash as their id - so this is the exact same InspectActivity call GetInvoice already makes,
+    // just returning the payment-shaped view of the entry instead of the invoice-shaped one.
+    public async Task<LightningPayment?> GetPayment(string paymentHash, CancellationToken cancellation = default)
+    {
+        var inspection = processManager.GetWalletInspectionClient(storeId)
+            ?? throw new InvalidOperationException($"waved for store {storeId} is not running");
+
+        try
+        {
+            var response = await inspection.InspectActivityAsync(
+                new InspectActivityRequest { Id = paymentHash }, cancellationToken: cancellation);
+            return ToLightningPayment(response.Entry);
+        }
+        catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound)
+        {
+            return null;
+        }
+    }
 
     public Task<LightningPayment[]> ListPayments(CancellationToken cancellation = default)
         => throw new NotSupportedException();
@@ -224,6 +273,25 @@ public sealed class WavelengthLightningClient(
         PaidAt = entry.Status == EntryStatus.Complete
             ? DateTimeOffset.FromUnixTimeSeconds(entry.UpdatedAtUnix)
             : null
+    };
+
+    private static LightningPayment ToLightningPayment(WalletEntry entry) => new()
+    {
+        Id = entry.Id,
+        PaymentHash = entry.Id,
+        Status = entry.Status switch
+        {
+            EntryStatus.Complete => LightningPaymentStatus.Complete,
+            EntryStatus.Failed => LightningPaymentStatus.Failed,
+            _ => LightningPaymentStatus.Pending
+        },
+        AmountSent = LightMoney.Satoshis(Math.Abs(entry.AmountSat)),
+        Fee = LightMoney.Satoshis(entry.FeeSat),
+        CreatedAt = DateTimeOffset.FromUnixTimeSeconds(entry.CreatedAtUnix),
+        BOLT11 = entry.Request?.LightningInvoice?.Invoice,
+        // Populated only once the swap durably reveals it (see WalletEntryProgress.preimage's own
+        // doc comment) - empty/absent is the normal, expected state for anything not yet Complete.
+        Preimage = string.IsNullOrEmpty(entry.Progress?.Preimage) ? null : entry.Progress.Preimage
     };
 
     private async Task<WalletEntry> PollUntilTerminalAsync(string entryId, CancellationToken cancellation)
