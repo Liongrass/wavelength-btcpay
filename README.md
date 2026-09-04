@@ -56,18 +56,21 @@ ring, so reaching a store's `waved` instance requires having actually seen that 
 generated connection string, not just knowing its ID (which is often visible to anyone with even
 minor access to a store). Don't share it or reuse it for another store.
 
-Wavelength can run with a Lightweight (`lwwallet`), Neutrino (`btcwallet`), or LND wallet backend,
-on `mainnet`, `signet`, `testnet`, `simnet`, or `regtest`. Besides `token`, any flag `waved`
-itself accepts can be added the same way (e.g. `network`, `wallet.esploraurl`, `server.host`) and
-is passed straight through as `--flag value` to that store's `waved` process. A handful of flags
-are managed by the plugin and can't be overridden: the ones this store's isolation depends on
-(`datadir`, `rpc.listenaddr`, `wallet.password_file`, `rpc.notls`, `rpc.no-macaroons`,
-`rpc.gateway.*`), plus every path- or listen-address-shaped flag with no legitimate use from a
-store's own connection string (`logdir`, `rpc.tlscertpath`, `rpc.tlskeypath`, `rpc.macaroonpath`,
-`server.macaroonpath`, `lnd.macaroonpath`, `swap.databasefilename`, `wallet.btcwallet_datadir`,
-`wallet.btcwallet_blockheaderssource`, `wallet.btcwallet_filterheaderssource`, `pprof.listen`,
-`metrics.listen`) - several of those would otherwise let a connection string make a store's
-`waved` instance read or write an arbitrary file on the server, or expose a debug endpoint.
+Wavelength can run with a Lightweight (`lwwallet`) or Neutrino (`btcwallet`) wallet backend from a
+store's own connection string, on `mainnet`, `signet`, `testnet`, `simnet`, or `regtest`. (An
+LND-backed wallet is possible too, but isn't offered here: it needs an lnd host and macaroon, and
+letting a store's own connection string set those would let it exfiltrate that macaroon to a
+server of its choosing.)
+
+Besides `token`, a reviewed set of additional `waved` flags can be added the same way (e.g.
+`network`, `wallet.esploraurl`, `wallet.feeurl`, `wallet.recoverywindow`, `debuglevel`,
+`allow-mainnet`, the round fee/refresh knobs, and the `oor.*`/`unroll.*` tuning namespaces) and is
+passed straight through as `--flag value` to that store's `waved` process. Anything not on that
+list is rejected rather than passed through: this plugin manages this store's isolation and auth
+(`datadir`, TLS/macaroon material, its listen address) itself, and several other `waved` flags
+would otherwise let a connection string read or write an arbitrary file on the server, or expose
+a debug endpoint, rather than just configure the wallet - see `WavedAllowedFlags` in the plugin
+source for the exact list and the reasoning behind it.
 
 **Before switching a store's wallet backend or network, delete its existing wallet first** —
 `waved` can't switch backend or network on an existing wallet in place. Changing flags on an

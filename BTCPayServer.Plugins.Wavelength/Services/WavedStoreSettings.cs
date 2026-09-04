@@ -17,11 +17,13 @@ public sealed record WavedStoreSettings
 
     /// <summary>
     /// Extra waved CLI flags parsed from the store's connection string (e.g. "network",
-    /// "wallet.esploraurl") - everything except type/token and WavedReservedFlags.Keys.
-    /// Refreshed every time WavedProcessManager.EnsureStartedAsync sees a live connection
-    /// string; used as-is on later restarts (crash recovery, BTCPay Server restart) when no
-    /// fresh connection string is available. A key already covered by WavedReservedFlags is
-    /// never persisted here - see WavelengthLightningConnectionStringHandler.
+    /// "wallet.esploraurl") - everything except type/token that WavedAllowedFlags.IsAllowed
+    /// accepts. Refreshed every time WavedProcessManager.EnsureStartedAsync sees a live
+    /// connection string; used as-is on later restarts (crash recovery, BTCPay Server restart)
+    /// when no fresh connection string is available. A key WavedAllowedFlags doesn't accept is
+    /// never persisted here - see WavelengthLightningConnectionStringHandler - and even a value
+    /// persisted before an allowlist tightening is filtered out again by
+    /// WavedProcessManager.StartStoreAsync before ever reaching waved.
     /// </summary>
     public Dictionary<string, string>? ExtraWavedFlags { get; init; }
 }

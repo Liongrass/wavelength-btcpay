@@ -34,14 +34,18 @@
         <div id="CustomWavelengthContent" class="accordion-collapse collapse" aria-labelledby="CustomWavelengthHeader" data-bs-parent="#CustomNodeSupport">
             <div class="accordion-body">
                 <p class="mb-2">
-                    Wavelength can be run with either Lightweight (<code>lwwallet</code>), Neutrino
-                    (<code>btcwallet</code>), or LND as a wallet backend. You may choose between
-                    <code>mainnet</code>, <code>signet</code>, <code>testnet</code>, <code>simnet</code>, and
-                    <code>regtest</code>.<br />
+                    Wavelength can be run with either Lightweight (<code>lwwallet</code>) or Neutrino
+                    (<code>btcwallet</code>) as a wallet backend from a store's own connection string. You may
+                    choose between <code>mainnet</code>, <code>signet</code>, <code>testnet</code>,
+                    <code>simnet</code>, and <code>regtest</code>.<br />
                     Each store may run its own <code>waved</code> instance on a separate network with a
                     separate backend.<br />
                     Please note that before switching between wallets or networks on the same store, the
-                    wallet has to be emptied and deleted.
+                    wallet has to be emptied and deleted.<br />
+                    (waved also supports an LND wallet backend, but it isn't offered here: it needs an lnd
+                    host and macaroon, and letting a store's own connection string set those would let it
+                    exfiltrate that macaroon to a server of its choosing - the same risk this allowlist exists
+                    to close off.)
                 </p>
                 <ul class="pb-2">
                     <li class="mb-2">
@@ -62,22 +66,19 @@
                     generate a fresh connection string here if you ever need to move this wallet.
                 </p>
                 <p class="my-2">
-                    Besides <code>token</code>, any flag <code>waved</code> itself accepts can be added the
-                    same way - e.g. <code>network</code>, <code>wallet.esploraurl</code>, <code>server.host</code>.
-                    They're passed straight through as <code>--flag value</code> on this store's <code>waved</code>
-                    process. A handful of flags are managed by the plugin and cannot be overridden here: the ones
-                    this store's isolation depends on (<code>datadir</code>, <code>rpc.listenaddr</code>,
-                    <code>wallet.password_file</code>, <code>rpc.notls</code>, <code>rpc.no-macaroons</code>,
-                    <code>rpc.gateway.*</code>), plus every path- or listen-address-shaped flag that has no
-                    legitimate use from a store's own connection string (<code>logdir</code>,
-                    <code>rpc.tlscertpath</code>, <code>rpc.tlskeypath</code>, <code>rpc.macaroonpath</code>,
-                    <code>server.macaroonpath</code>, <code>lnd.macaroonpath</code>,
-                    <code>swap.databasefilename</code>, <code>wallet.btcwallet_datadir</code>,
-                    <code>wallet.btcwallet_blockheaderssource</code>, <code>wallet.btcwallet_filterheaderssource</code>,
-                    <code>pprof.listen</code>, <code>metrics.listen</code>) - several of those would otherwise let a
-                    connection string make this store's waved instance read or write an arbitrary file on this
-                    server, or expose a debug endpoint, rather than just configuring the wallet. Changing flags on
-                    an already-running store takes effect on its next restart, not immediately.
+                    Besides <code>token</code>, a reviewed set of additional <code>waved</code> flags can be
+                    added the same way - e.g. <code>network</code>, <code>wallet.esploraurl</code>,
+                    <code>wallet.feeurl</code>, <code>wallet.recoverywindow</code>, <code>debuglevel</code>,
+                    <code>allow-mainnet</code>, the round fee/refresh knobs, and the <code>oor.*</code>/
+                    <code>unroll.*</code> tuning namespaces. They're passed straight through as
+                    <code>--flag value</code> on this store's <code>waved</code> process.
+                    Anything not on that list is rejected rather than passed through - this plugin manages this
+                    store's isolation and auth (<code>datadir</code>, TLS/macaroon material, its listen address)
+                    itself, and several other <code>waved</code> flags would otherwise let a connection string
+                    read or write an arbitrary file on this server, or expose a debug endpoint, rather than just
+                    configure the wallet - see <code>WavedAllowedFlags</code> in the plugin source for the exact
+                    list and the reasoning behind it. Changing flags on an already-running store takes effect on
+                    its next restart, not immediately.
                 </p>
                 <!-- TODO: link to a Wavelength settings/setup page once one exists, mirroring
                      bark-btcpay's "Bark settings" link, so users can initialize/back up the

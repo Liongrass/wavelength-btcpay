@@ -13,9 +13,9 @@ namespace BTCPayServer.Plugins.Wavelength.Lightning;
 /// WavedStoreTokenProtector rather than being the storeId itself (see that class's doc comment
 /// for why - in short, a store's real ID is too easy to come by to double as authorization for
 /// which waved instance a connection string is allowed to reach). Every other key (besides
-/// "type"/"token") is passed through verbatim as a "--key value" waved flag - e.g.
-/// "network=regtest" becomes "--network regtest" - except the handful WavedReservedFlags.Keys
-/// owns, which are rejected here rather than silently dropped or silently overridden.
+/// "type"/"token") is passed through as a "--key value" waved flag - e.g. "network=regtest"
+/// becomes "--network regtest" - but only if WavedAllowedFlags.IsAllowed accepts it; everything
+/// else is rejected here rather than silently dropped or silently passed through unreviewed.
 /// </summary>
 public sealed class WavelengthLightningConnectionStringHandler(
     IServiceProvider serviceProvider, WavedStoreTokenProtector tokenProtector)
@@ -64,10 +64,10 @@ public sealed class WavelengthLightningConnectionStringHandler(
 
     /// <summary>
     /// Extracts the extra waved flags from a wavelength connection string ("type" and "token"
-    /// stripped, WavedReservedFlags.Keys rejected) - the same parsing <see cref="Create"/> uses,
-    /// exposed so other call sites (e.g. the Advanced page's "Restart waved" action, which needs
-    /// to re-derive flags from the store's current live connection string rather than whatever
-    /// was last persisted) don't have to duplicate it.
+    /// stripped, everything WavedAllowedFlags.IsAllowed doesn't accept rejected) - the same
+    /// parsing <see cref="Create"/> uses, exposed so other call sites (e.g. the Advanced page's
+    /// "Restart waved" action, which needs to re-derive flags from the store's current live
+    /// connection string rather than whatever was last persisted) don't have to duplicate it.
     /// </summary>
     public static bool TryParseExtraFlags(string connectionString, out Dictionary<string, string> extraFlags, out string? error)
     {
@@ -78,10 +78,11 @@ public sealed class WavelengthLightningConnectionStringHandler(
             if (key is "type" or "token")
                 continue;
 
-            if (WavedReservedFlags.Keys.Contains(key))
+            if (!WavedAllowedFlags.IsAllowed(key))
             {
-                error = $"The key '{key}' is managed by the plugin and cannot be set in a wavelength " +
-                        "connection string. Remove it - everything else waved accepts is passed through.";
+                error = $"The key '{key}' isn't one this plugin allows in a wavelength connection " +
+                        "string. Only a reviewed set of waved flags can be set this way - see " +
+                        "WavedAllowedFlags for the full list.";
                 return false;
             }
 

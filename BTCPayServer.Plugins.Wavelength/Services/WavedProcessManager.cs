@@ -385,16 +385,18 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         try
         {
             // Server-wide default first, then whatever the store's connection string actually
-            // asked for (skipping anything WavedReservedFlags owns - the connection string
-            // handler already rejects those at Create() time, this is defense in depth), then the
-            // plugin-owned flags always win regardless of what's upstream of them.
+            // asked for (dropping anything WavedAllowedFlags.IsAllowed doesn't accept - the
+            // connection string handler already rejects those at Create() time, this is defense
+            // in depth and also what retroactively sanitizes flags a store persisted under an
+            // older, more permissive allowlist/denylist before this store's next restart), then
+            // the plugin-owned flags always win regardless of what's upstream of them.
             var flags = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
             {
                 ["network"] = _config.Network,
             };
             foreach (var (key, value) in extraFlags)
             {
-                if (!WavedReservedFlags.Keys.Contains(key))
+                if (WavedAllowedFlags.IsAllowed(key))
                     flags[key] = value;
             }
             flags["datadir"] = dataDir;
@@ -412,8 +414,8 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
             // wrong macaroon would be rejected. It does NOT, on its own, stop a connection string
             // from correctly and legitimately being told to reach a different store's instance -
             // that's WavedStoreTokenProtector's job (see WavelengthLightningConnectionStringHandler),
-            // a separate, complementary layer. WavedReservedFlags still blocks a connection string
-            // from disabling rpc.notls/rpc.no-macaroons, so a store owner can't weaken this back down.
+            // a separate, complementary layer. rpc.notls/rpc.no-macaroons aren't on
+            // WavedAllowedFlags at all, so a store owner can't weaken this back down.
 
             var startInfo = new ProcessStartInfo
             {
@@ -432,7 +434,10 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
             // Must be a single --flag=false argument, not two separate ones ("--flag" "false") -
             // pflag/cobra bool flags don't consume the next argument as their value; --flag alone
             // sets it true, and only the combined --flag=false form explicitly negates a
-            // default-true flag like this one. See WavedReservedFlags for why it's disabled.
+            // default-true flag like this one. Disabled outright (rather than left
+            // store-configurable, which isn't on WavedAllowedFlags anyway) because it's a second
+            // listener entirely separate from rpc.listenaddr's gRPC one, defaulting to a FIXED
+            // port every store's waved instance would otherwise collide on.
             startInfo.ArgumentList.Add("--rpc.gateway.enabled=false");
 
             // Captured so a startup failure can report *why* waved exited, not just its exit code
