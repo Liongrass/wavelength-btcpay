@@ -22,4 +22,45 @@ public class WavedProcessManagerTests
     {
         Assert.Equal(value, WavedProcessManager.RedactUserInfo(value));
     }
+
+    [Fact]
+    public void BuildFlagArgumentsCombinesEachKeyAndValueIntoOneToken()
+    {
+        var flags = new Dictionary<string, string?>
+        {
+            ["network"] = "signet",
+            ["allow-mainnet"] = "true"
+        };
+
+        var args = WavedProcessManager.BuildFlagArguments(flags).ToArray();
+
+        Assert.Equal(["--network=signet", "--allow-mainnet=true"], args);
+    }
+
+    [Fact]
+    public void BuildFlagArgumentsOmitsTheValueTokenEntirelyWhenNull()
+    {
+        var flags = new Dictionary<string, string?> { ["eagerroundjoin"] = null };
+
+        Assert.Equal(["--eagerroundjoin"], WavedProcessManager.BuildFlagArguments(flags).ToArray());
+    }
+
+    // Regression test for the pflag bool-flag argument-injection bypass: pflag/cobra bool flags
+    // don't consume the next argv token as their value, so if a bool-typed allowlisted key's
+    // "value" were ever emitted as a SEPARATE token, waved's own flag parser would parse it as an
+    // entirely independent, unvalidated flag - completely bypassing WavedAllowedFlags. Asserting
+    // the whole thing lands in one array element (not two) is the actual safety property; the
+    // exact string is secondary.
+    [Fact]
+    public void BuildFlagArgumentsNeverSplitsAnInjectionAttemptIntoASeparateToken()
+    {
+        var flags = new Dictionary<string, string?>
+        {
+            ["allow-mainnet"] = "--rpc.macaroonpath=/some/other/store/admin.macaroon"
+        };
+
+        var args = WavedProcessManager.BuildFlagArguments(flags).ToArray();
+
+        Assert.Equal(["--allow-mainnet=--rpc.macaroonpath=/some/other/store/admin.macaroon"], args);
+    }
 }

@@ -452,19 +452,12 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
-            foreach (var (key, value) in flags)
-            {
-                startInfo.ArgumentList.Add($"--{key}");
-                if (value is not null)
-                    startInfo.ArgumentList.Add(value);
-            }
-            // Must be a single --flag=false argument, not two separate ones ("--flag" "false") -
-            // pflag/cobra bool flags don't consume the next argument as their value; --flag alone
-            // sets it true, and only the combined --flag=false form explicitly negates a
-            // default-true flag like this one. Disabled outright (rather than left
-            // store-configurable, which isn't on WavedAllowedFlags anyway) because it's a second
-            // listener entirely separate from rpc.listenaddr's gRPC one, defaulting to a FIXED
-            // port every store's waved instance would otherwise collide on.
+            foreach (var arg in BuildFlagArguments(flags))
+                startInfo.ArgumentList.Add(arg);
+            // Disabled outright (rather than left store-configurable, which isn't on
+            // WavedAllowedFlags anyway) because it's a second listener entirely separate from
+            // rpc.listenaddr's gRPC one, defaulting to a FIXED port every store's waved instance
+            // would otherwise collide on.
             startInfo.ArgumentList.Add("--rpc.gateway.enabled=false");
 
             // Captured so a startup failure can report *why* waved exited, not just its exit code
@@ -944,6 +937,23 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
 
     private string ResolveBinaryPath(string binaryName)
         => Path.Combine(_nativeDir, GetRuntimeIdentifier(), binaryName);
+
+    // Every flag becomes a SINGLE "--key=value" argv token, never two separate ones
+    // ("--key", "value"). This isn't cosmetic: pflag/cobra bool flags have a NoOptDefVal and
+    // don't consume the next argv token as their value at all - "--key" alone sets a bool flag
+    // true, and whatever token follows it is then parsed completely independently as its OWN
+    // flag. WavedAllowedFlags only validates the KEY of each store-supplied flag; if a store
+    // picks an allowlisted bool-typed key (e.g. allow-mainnet) and sets its "value" to something
+    // like "--rpc.macaroonpath=/path", two separate tokens would hand waved's own flag parser
+    // exactly that as a second, completely unvalidated flag - reopening the
+    // arbitrary-file-read-and-exfiltrate hole WavedAllowedFlags exists to close, entirely
+    // bypassing this plugin's own allowlist. The combined "--key=value" form has no such
+    // ambiguity for any flag type (pflag takes everything after the first "=" as the literal
+    // value, full stop), which is exactly why --rpc.gateway.enabled=false is written that way too
+    // - this is that same treatment, applied uniformly. Internal (not private) so
+    // WavedProcessManagerTests can exercise it directly.
+    internal static IEnumerable<string> BuildFlagArguments(IReadOnlyDictionary<string, string?> flags)
+        => flags.Select(kv => kv.Value is null ? $"--{kv.Key}" : $"--{kv.Key}={kv.Value}");
 
     // Generic on purpose: rather than hardcoding "wallet.esploraurl/wallet.feeurl are the
     // sensitive keys" (a list that goes stale the moment WavedAllowedFlags grows another
