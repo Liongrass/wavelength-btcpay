@@ -187,10 +187,42 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         _ = cancellationToken;
         var settings = await _storeRepository.GetSettingAsync<WavedStoreSettings>(storeId, WavedStoreSettings.SettingsKey)
             ?? new WavedStoreSettings();
+
+        // Every Lightning operation through WavelengthLightningClient calls EnsureStartedAsync
+        // with its own extraFlags - which, once a store is up and running, is the SAME dictionary
+        // on every single call (invoice creation, GetInvoice polls, payout attempts...). Public,
+        // unauthenticated invoice creation reaches this too, so writing an unchanged settings row
+        // on every one of those is unauthenticated-triggerable write pressure on a hot row for no
+        // reason - skip UpdateSetting entirely when nothing actually changed.
+        if (FlagsEqual(settings.ExtraWavedFlags, extraFlags))
+            return;
+
         await _storeRepository.UpdateSetting(storeId, WavedStoreSettings.SettingsKey, settings with
         {
             ExtraWavedFlags = new Dictionary<string, string>(extraFlags, StringComparer.OrdinalIgnoreCase)
         });
+    }
+
+    // Keys compared case-insensitively (matches how flag keys are treated everywhere else in this
+    // file); values compared as-is since a flag's value can be meaningfully case-sensitive (a URL
+    // path, for instance). Deserializing settings.ExtraWavedFlags back from storage doesn't
+    // necessarily preserve the OrdinalIgnoreCase comparer it was written with, so persisted is
+    // re-wrapped here rather than trusted to already compare keys that way.
+    internal static bool FlagsEqual(IReadOnlyDictionary<string, string>? persisted, IReadOnlyDictionary<string, string> current)
+    {
+        if (persisted is null)
+            return current.Count == 0;
+        if (persisted.Count != current.Count)
+            return false;
+
+        var normalized = new Dictionary<string, string>(persisted, StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in current)
+        {
+            if (!normalized.TryGetValue(key, out var persistedValue) || persistedValue != value)
+                return false;
+        }
+
+        return true;
     }
 
     private async Task<IReadOnlyDictionary<string, string>> LoadPersistedFlagsAsync(string storeId, CancellationToken cancellationToken)

@@ -64,17 +64,25 @@ public sealed class WavelengthLightningInvoiceListener : ILightningInvoiceListen
     public async Task<LightningInvoice> WaitInvoice(CancellationToken cancellation)
     {
         using var combined = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellation);
-        try
-        {
-            while (await _channel.Reader.WaitToReadAsync(combined.Token))
-            {
-                if (_channel.Reader.TryRead(out var invoice))
-                    return invoice;
-            }
-        }
-        catch (OperationCanceledException) { }
 
-        return new LightningInvoice();
+        // Deliberately doesn't catch OperationCanceledException here. BTCPay core's
+        // LightningListener.Listen awaits this in a loop and expects cancellation to propagate as
+        // an exception, not as a sentinel result it then has to sanity-check - the empty
+        // LightningInvoice() this used to return on cancellation (Id == null) instead reached
+        // LightningListener's own _ListenedInvoices.TryGetValue(notification.Id, ...)
+        // (LightningListener.cs:547), and Dictionary.TryGetValue(null, ...) throws
+        // ArgumentNullException - crashing the listener with a spurious error log rather than
+        // exiting cleanly the way a genuinely cancelled wait is supposed to.
+        while (await _channel.Reader.WaitToReadAsync(combined.Token))
+        {
+            if (_channel.Reader.TryRead(out var invoice))
+                return invoice;
+        }
+
+        // The channel completed (Dispose ran) without combined.Token itself being cancelled
+        // first - there will never be another invoice, so this is cancellation in every way that
+        // matters to the caller.
+        throw new OperationCanceledException(combined.Token);
     }
 
     public void Dispose()

@@ -1,13 +1,27 @@
 @using BTCPayServer
+@using BTCPayServer.Client
 @using BTCPayServer.Data
 @using BTCPayServer.Payments
 @using BTCPayServer.Payments.Lightning
+@using Microsoft.AspNetCore.Authorization
 @model BTCPayServer.Components.MainNav.MainNavViewModel
 @inject BTCPayServer.Plugins.Wavelength.Services.WavedProcessManager ProcessManager
 @inject BTCPayServer.Services.Invoices.PaymentMethodHandlerDictionary Handlers
+@inject IAuthorizationService AuthorizationService
 
 @{
     var store = Context.GetStoreData();
+
+    // Every plugin action this nav entry links to is gated on CanModifyStoreSettings (see
+    // UIWavelengthController's class-level [Authorize]) - a Manager/Employee/Guest clicking
+    // through would just 403. But the entry itself renders for anyone who can view the store at
+    // all, disclosing that the store's backend is wavelength plus a LIVE running/not-running
+    // signal on every page load - low-value to an attacker, but daemon liveness is exactly the
+    // kind of signal useful for timing a disruption attempt, and view-only staff have no
+    // legitimate need for either. One extra authorization call per nav render is the cost of not
+    // disclosing it to them.
+    var canManage = store != null
+        && (await AuthorizationService.AuthorizeAsync(Context.User, store.Id, Policies.CanModifyStoreSettings)).Succeeded;
 
     // Cheap, RPC-free signals only - this partial renders on every page for the store, so a
     // live Status/Balance check here would add latency to every single page load. No "error"
@@ -16,16 +30,16 @@
     var lnId = PaymentTypes.LN.GetPaymentMethodId("BTC");
     var isWavelength = store?.GetPaymentMethodConfig<LightningPaymentMethodConfig>(lnId, Handlers)
         ?.ConnectionString?.StartsWith("type=wavelength", StringComparison.OrdinalIgnoreCase) == true;
-    var isRunning = store != null && ProcessManager.IsRunning(store.Id);
+    var isRunning = canManage && ProcessManager.IsRunning(store!.Id);
     var status = isWavelength && isRunning ? "enabled" : "pending";
 }
 
-@if (store != null)
+@if (canManage)
 {
     <li class="nav-item">
         <a layout-menu-item="Wavelength-Index" layout-menu-item-category="Wavelength"
            asp-controller="UIWavelength" asp-action="Index"
-           asp-route-storeId="@store.Id"
+           asp-route-storeId="@store!.Id"
            id="StoreNav-Wavelength">
             <span class="me-2 btcpay-status btcpay-status--@status"></span>
             <span>Wavelength</span>

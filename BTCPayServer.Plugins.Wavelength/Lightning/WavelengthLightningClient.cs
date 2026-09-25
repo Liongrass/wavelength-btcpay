@@ -178,6 +178,16 @@ public sealed class WavelengthLightningClient(
         {
             return new PayResponse(PayResult.Unknown, ex.Status.Detail);
         }
+        catch (FormatException ex)
+        {
+            // entry.Id should always be a valid hex payment hash for a swap-backed send (see the
+            // ToLightningPayment/GetPayment doc comment) - this is a genuinely unexpected shape
+            // from waved, not something a caller can provoke. Still Unknown, not Error: waved may
+            // have reported EntryStatus.Complete right above this parse, i.e. the payment likely
+            // DID succeed - we just failed to describe it, which is exactly the "don't let the
+            // automated payout processor retry a payment that might have gone through" case.
+            return new PayResponse(PayResult.Unknown, ex.Message);
+        }
     }
 
     public Task<PayResponse> Pay(PayInvoiceParams payParams, CancellationToken cancellation = default)

@@ -63,4 +63,33 @@ public class WavedProcessManagerTests
 
         Assert.Equal(["--allow-mainnet=--rpc.macaroonpath=/some/other/store/admin.macaroon"], args);
     }
+
+    [Fact]
+    public void FlagsEqualTreatsNullPersistedAsEqualOnlyToEmptyCurrent()
+    {
+        Assert.True(WavedProcessManager.FlagsEqual(null, new Dictionary<string, string>()));
+        Assert.False(WavedProcessManager.FlagsEqual(null, new Dictionary<string, string> { ["network"] = "signet" }));
+    }
+
+    [Fact]
+    public void FlagsEqualComparesKeysCaseInsensitivelyAndValuesCaseSensitively()
+    {
+        var persisted = new Dictionary<string, string> { ["Network"] = "signet" };
+        var sameValue = new Dictionary<string, string> { ["network"] = "signet" };
+        var differentValueCase = new Dictionary<string, string> { ["network"] = "Signet" };
+
+        Assert.True(WavedProcessManager.FlagsEqual(persisted, sameValue));
+        Assert.False(WavedProcessManager.FlagsEqual(persisted, differentValueCase));
+    }
+
+    [Fact]
+    public void FlagsEqualIsFalseWhenCountsOrContentsDiffer()
+    {
+        var persisted = new Dictionary<string, string> { ["network"] = "signet" };
+
+        Assert.False(WavedProcessManager.FlagsEqual(persisted, new Dictionary<string, string>()));
+        Assert.False(WavedProcessManager.FlagsEqual(persisted, new Dictionary<string, string> { ["network"] = "mainnet" }));
+        Assert.False(WavedProcessManager.FlagsEqual(persisted,
+            new Dictionary<string, string> { ["network"] = "signet", ["debuglevel"] = "info" }));
+    }
 }
