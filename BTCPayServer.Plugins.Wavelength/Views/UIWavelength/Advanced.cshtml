@@ -85,6 +85,24 @@
 </div>
 
 <div class="widget mt-4">
+    <h6 class="mb-3">Connection string token</h6>
+    <p class="text-muted">
+        This store's connection string carries a token unique to it. Generate a new one to revoke
+        the old: the connection string saved on this store's Lightning setup page stops working
+        immediately, and you must paste the new token there before Lightning works again. Use this
+        if the string has been shared or exposed beyond the people who should have it.
+    </p>
+    <p class="text-muted">
+        Only this store's token is affected - other stores' strings keep working.
+    </p>
+    <form method="post" asp-action="RegenerateToken" asp-route-storeId="@Model.StoreId" class="d-inline">
+        @Html.AntiForgeryToken()
+        <button type="submit" class="btn btn-outline-secondary">Regenerate token</button>
+    </form>
+    <a asp-controller="UIStores" asp-action="SetupLightningNode" asp-route-storeId="@Model.StoreId" asp-route-cryptoCode="BTC" class="btn btn-link">Set up the new token</a>
+</div>
+
+<div class="widget mt-4">
     <h6 class="mb-3">VTXOs</h6>
     <p class="text-muted">
         Inspect every VTXO this wallet currently holds - outpoint, status, amount, and batch

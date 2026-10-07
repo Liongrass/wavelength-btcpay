@@ -29,6 +29,16 @@ public partial class UIWavelengthController
         if (store is null) return NotFound();
         if (GetWavelengthConfig(store) is null) return RedirectToLightningSetup(storeId);
 
+        // Deleting a store's wallet data is a destructive action, and one this plugin gates like
+        // the rest - see IsWavelengthAllowedForCurrentUserAsync. A store that was never approved
+        // has no wallet of this plugin's to delete, so this is mostly a guard against someone
+        // acting on a store they no longer administer.
+        if (!await IsWavelengthAllowedForCurrentUserAsync(storeId, cancellationToken))
+        {
+            TempData[WellKnownTempData.ErrorMessage] = NotApprovedMessage;
+            return RedirectToAction(nameof(Index), new { storeId });
+        }
+
         if (!string.Equals(confirmation?.Trim(), DeleteConfirmationPhrase, StringComparison.Ordinal))
         {
             var vm = await BuildDeleteViewModelAsync(storeId, cancellationToken);

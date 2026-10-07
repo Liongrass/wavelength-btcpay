@@ -39,7 +39,7 @@ public partial class UIWavelengthController
         }
         catch (RpcException ex)
         {
-            vm.ErrorMessage = ex.Status.Detail;
+            vm.ErrorMessage = TruncateErrorText(ex.Status.Detail);
         }
 
         return View(vm);
@@ -93,6 +93,12 @@ public partial class UIWavelengthController
         var wavelengthConfig = GetWavelengthConfig(store);
         if (wavelengthConfig is null) return RedirectToLightningSetup(storeId);
 
+        if (!await IsWavelengthAllowedForCurrentUserAsync(storeId, cancellationToken))
+        {
+            TempData[WellKnownTempData.ErrorMessage] = NotApprovedMessage;
+            return RedirectToAction(nameof(Vtxos), new { storeId });
+        }
+
         if (outpoints is null || outpoints.Length == 0)
         {
             TempData[WellKnownTempData.ErrorMessage] = "Select at least one VTXO first.";
@@ -125,7 +131,7 @@ public partial class UIWavelengthController
         }
         catch (RpcException ex)
         {
-            vm.ErrorMessage = ex.Status.Detail;
+            vm.ErrorMessage = TruncateErrorText(ex.Status.Detail);
         }
 
         return View(vm);

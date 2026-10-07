@@ -32,6 +32,12 @@ public partial class UIWavelengthController
         var wavelengthConfig = GetWavelengthConfig(store);
         if (wavelengthConfig is null) return RedirectToLightningSetup(storeId);
 
+        if (!await IsWavelengthAllowedForCurrentUserAsync(storeId, cancellationToken))
+        {
+            TempData[WellKnownTempData.ErrorMessage] = NotApprovedMessage;
+            return RedirectToAction(nameof(Index), new { storeId });
+        }
+
         model.StoreId = storeId;
 
         if (await RedirectIfNoWalletAsync(storeId, wavelengthConfig, cancellationToken) is { } redirect)
@@ -122,7 +128,7 @@ public partial class UIWavelengthController
         }
         catch (RpcException ex)
         {
-            model.ErrorMessage = ex.Status.Detail;
+            model.ErrorMessage = TruncateErrorText(ex.Status.Detail);
         }
 
         return View(model);

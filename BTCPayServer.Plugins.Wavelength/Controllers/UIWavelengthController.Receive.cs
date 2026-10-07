@@ -1,4 +1,5 @@
 using BTCPayServer.Data;
+using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Plugins.Wavelength.ViewModels;
 using BTCPayServer.Rating;
 using BTCPayServer.Services.Rates;
@@ -33,6 +34,12 @@ public partial class UIWavelengthController
         if (store is null) return NotFound();
         var wavelengthConfig = GetWavelengthConfig(store);
         if (wavelengthConfig is null) return RedirectToLightningSetup(storeId);
+
+        if (!await IsWavelengthAllowedForCurrentUserAsync(storeId, cancellationToken))
+        {
+            TempData[WellKnownTempData.ErrorMessage] = NotApprovedMessage;
+            return RedirectToAction(nameof(Index), new { storeId });
+        }
 
         model.StoreId = storeId;
         model.Invoice = null;
@@ -89,7 +96,7 @@ public partial class UIWavelengthController
         }
         catch (RpcException ex)
         {
-            model.ErrorMessage = ex.Status.Detail;
+            model.ErrorMessage = TruncateErrorText(ex.Status.Detail);
         }
 
         return View(model);

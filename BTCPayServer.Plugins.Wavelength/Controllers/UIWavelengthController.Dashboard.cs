@@ -18,6 +18,18 @@ public partial class UIWavelengthController
         var wavelengthConfig = GetWavelengthConfig(store);
         if (wavelengthConfig is null) return RedirectToLightningSetup(storeId);
 
+        // The approval boundary applies here first: this page starts the process, so a store that
+        // has not been approved for Wavelength must not be started by simply visiting it. Shown as
+        // an error on the page rather than a redirect, since the reason belongs in front of the
+        // person who is looking at this store. See IsWavelengthAllowedForCurrentUserAsync.
+        if (!await IsWavelengthAllowedForCurrentUserAsync(storeId, cancellationToken))
+        {
+            return View(new WavelengthWalletViewModel
+            {
+                StoreId = storeId, IsRunning = false, StartupError = NotApprovedMessage
+            });
+        }
+
         // Visiting the dashboard counts as "first use" for lazy process start, same as any RPC
         // through WavelengthLightningClient - see WavedProcessManager.EnsureStartedAsync. A
         // failure to start (bad flags, waved crashed, etc.) must never bubble up past this
@@ -29,9 +41,13 @@ public partial class UIWavelengthController
         // saved on the Lightning setup page - see RedirectIfNoWalletAsync's doc comment for why
         // that matters.
         if (!WavelengthLightningConnectionStringHandler.TryParseExtraFlags(
-                wavelengthConfig.ConnectionString!, out var extraFlags, out var parseError))
+                wavelengthConfig.ConnectionString!, out var extraFlags, out var parseError,
+                allowLocal: (await storeSettings.GetAsync(storeId, cancellationToken)).AllowLocalEndpoints))
         {
-            return View(new WavelengthWalletViewModel { StoreId = storeId, IsRunning = false, StartupError = parseError });
+            return View(new WavelengthWalletViewModel
+            {
+                StoreId = storeId, IsRunning = false, StartupError = TruncateErrorText(parseError)
+            });
         }
 
         try
@@ -40,7 +56,7 @@ public partial class UIWavelengthController
         }
         catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or RpcException)
         {
-            var detail = ex is RpcException rpcEx ? rpcEx.Status.Detail : ex.Message;
+            var detail = TruncateErrorText(ex is RpcException rpcEx ? rpcEx.Status.Detail : ex.Message);
             return View(new WavelengthWalletViewModel { StoreId = storeId, IsRunning = false, StartupError = detail });
         }
 
@@ -53,7 +69,7 @@ public partial class UIWavelengthController
         if (!await processManager.WalletExistsAsync(storeId, cancellationToken))
         {
             if (processManager.TryGetCreationError(storeId, out var creationError))
-                TempData[WellKnownTempData.ErrorMessage] = creationError;
+                TempData[WellKnownTempData.ErrorMessage] = TruncateErrorText(creationError);
 
             var isCreating = processManager.IsCreatingWallet(storeId);
             var vm = new WavelengthWalletViewModel
@@ -109,7 +125,8 @@ public partial class UIWavelengthController
         {
             return View(new WavelengthWalletViewModel
             {
-                StoreId = storeId, IsRunning = true, WalletExists = true, StartupError = ex.Status.Detail
+                StoreId = storeId, IsRunning = true, WalletExists = true,
+                StartupError = TruncateErrorText(ex.Status.Detail)
             });
         }
     }
@@ -124,10 +141,22 @@ public partial class UIWavelengthController
         var wavelengthConfig = GetWavelengthConfig(store);
         if (wavelengthConfig is null) return RedirectToLightningSetup(storeId);
 
-        if (!WavelengthLightningConnectionStringHandler.TryParseExtraFlags(
-                wavelengthConfig.ConnectionString!, out var extraFlags, out var parseError))
+        // The other half of the approval boundary - see IsWavelengthAllowedForCurrentUserAsync.
+        // Gated here as well as at connection-string save time because this button reaches
+        // StartCreateWalletAsync, which mints a seed, without any connection string being
+        // re-saved: a store that was approved once and whose owner has since been demoted (or a
+        // server that turned AllowForAllStores back off) is still stopped from creating one.
+        if (!await IsWavelengthAllowedForCurrentUserAsync(storeId, cancellationToken))
         {
-            TempData[WellKnownTempData.ErrorMessage] = parseError;
+            TempData[WellKnownTempData.ErrorMessage] = NotApprovedMessage;
+            return RedirectToAction(nameof(Index), new { storeId });
+        }
+
+        if (!WavelengthLightningConnectionStringHandler.TryParseExtraFlags(
+                wavelengthConfig.ConnectionString!, out var extraFlags, out var parseError,
+                allowLocal: (await storeSettings.GetAsync(storeId, cancellationToken)).AllowLocalEndpoints))
+        {
+            TempData[WellKnownTempData.ErrorMessage] = TruncateErrorText(parseError);
             return RedirectToAction(nameof(Index), new { storeId });
         }
 
@@ -137,7 +166,8 @@ public partial class UIWavelengthController
         }
         catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or RpcException)
         {
-            TempData[WellKnownTempData.ErrorMessage] = ex is RpcException rpcEx ? rpcEx.Status.Detail : ex.Message;
+            TempData[WellKnownTempData.ErrorMessage] =
+                TruncateErrorText(ex is RpcException rpcEx ? rpcEx.Status.Detail : ex.Message);
             return RedirectToAction(nameof(Index), new { storeId });
         }
 

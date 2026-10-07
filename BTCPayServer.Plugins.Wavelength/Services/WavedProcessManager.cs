@@ -6,6 +6,7 @@ using System.Net.Sockets;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
+using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Events;
 using BTCPayServer.Services.Stores;
 using Google.Protobuf;
@@ -43,6 +44,8 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     private readonly EventAggregator _eventAggregator;
     private readonly WavedWalletCredentialStore _credentialStore;
     private readonly WavedMnemonicPendingCache _mnemonicCache;
+    private readonly WavedStoreSettingsStore _storeSettings;
+    private readonly IWavelengthServerSettingsSource _serverSettings;
     private readonly ILogger<WavedProcessManager> _logger;
     private readonly string _nativeDir;
 
@@ -62,6 +65,8 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         EventAggregator eventAggregator,
         WavedWalletCredentialStore credentialStore,
         WavedMnemonicPendingCache mnemonicCache,
+        WavedStoreSettingsStore storeSettings,
+        IWavelengthServerSettingsSource serverSettings,
         ILogger<WavedProcessManager> logger)
     {
         _config = config;
@@ -69,6 +74,8 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         _eventAggregator = eventAggregator;
         _credentialStore = credentialStore;
         _mnemonicCache = mnemonicCache;
+        _storeSettings = storeSettings;
+        _serverSettings = serverSettings;
         _logger = logger;
 
         var assemblyDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
@@ -137,6 +144,9 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
                 return;
             }
 
+            // See EnforceProcessLimitAsync for what this bounds and why it is asked here.
+            await EnforceProcessLimitAsync(storeId, cancellationToken);
+
             var resolvedFlags = extraFlags ?? await LoadPersistedFlagsAsync(storeId, cancellationToken);
             await StartStoreAsync(storeId, resolvedFlags, cancellationToken);
         }
@@ -144,6 +154,45 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         {
             startLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Refuses to start another waved process once the server's ceiling is reached. See
+    /// WavelengthServerSettings.MaxStoreProcesses for why an unbounded number of them is itself a
+    /// problem, and WavelengthServerSettingsProvider for how an operator raises it.
+    ///
+    /// Counted over stores whose process is currently alive rather than over every store that has
+    /// ever started one, so a server that has churned through many stores does not accumulate a
+    /// permanent debt against the ceiling. The count is taken under this store's start lock but is
+    /// not itself atomic across stores: two stores starting at the same instant can both observe a
+    /// count one below the ceiling and each start. That is deliberate - an exact ceiling would mean
+    /// serializing every start on one global lock, for a bound whose purpose is to keep an attacker
+    /// from forking thousands of daemons, not to be a precise quota.
+    ///
+    /// Every start path reaches this, including the startup pre-warm and the crash-restart loop -
+    /// both call EnsureStartedAsync rather than StartStoreAsync. A store already running is never
+    /// refused, so a restart of the server that finds itself above a lowered ceiling still brings
+    /// up the processes it already had.
+    /// </summary>
+    private async Task EnforceProcessLimitAsync(string storeId, CancellationToken cancellationToken)
+    {
+        if (IsRunning(storeId))
+            return;
+
+        var settings = await _serverSettings.GetAsync(cancellationToken);
+        var running = GetRunningStoreIds().Count;
+        if (running < settings.MaxStoreProcesses)
+            return;
+
+        _logger.LogWarning(
+            "Refusing to start waved for store {StoreId}: {Running} processes are already running, " +
+            "which is the configured limit of {Limit}",
+            storeId, running, settings.MaxStoreProcesses);
+
+        throw new InvalidOperationException(
+            $"The limit of {settings.MaxStoreProcesses} running waved processes has been reached. " +
+            "Stop another store's Wavelength wallet, or ask the server administrator to raise the " +
+            "limit in the server settings.");
     }
 
     /// <summary>
@@ -162,6 +211,13 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         await startLock.WaitAsync(cancellationToken);
         try
         {
+            // Checked before stopping anything, not after. A restart of a store that is already
+            // running must never leave it stopped: its own process is one of the ones being counted
+            // against the ceiling, so with the ceiling reached it would be stopped, refused, and left
+            // down - a state no one asked for and nothing would bring back until the next visit.
+            // Asked first, the store's own slot still counts for it and the restart always proceeds.
+            await EnforceProcessLimitAsync(storeId, cancellationToken);
+
             await PersistFlagsAsync(storeId, extraFlags, cancellationToken);
 
             if (IsRunning(storeId))
@@ -324,6 +380,13 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
                     if (!Directory.EnumerateFileSystemEntries(dir).Any())
                         continue;
 
+                    // Warm the settings cache first, here where the read is already awaited on
+                    // an async path. The token-verification check on core's Lightning hot path
+                    // reads this row synchronously (see WavedStoreSettingsStore.GetSeed), so every
+                    // store this loop warms now is one whose first invoice after a restart does not
+                    // pay a blocking database read on the checkout path.
+                    await _storeSettings.GetAsync(storeId, stoppingToken);
+
                     if (await _storeRepository.FindStore(storeId) is null)
                     {
                         _logger.LogInformation("Skipping orphaned wallet directory for deleted store {StoreId}", storeId);
@@ -453,11 +516,32 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
             {
                 ["network"] = _config.Network,
             };
+            // The same allowlist filter, plus a value check: a flag persisted before this release (or
+            // before the value rules existed) has never passed through
+            // WavelengthLightningConnectionStringHandler's validation, so this is where it is caught -
+            // and it is refused outright rather than dropped, because silently starting waved without
+            // an endpoint the store believes it configured would be a worse outcome than not starting
+            // it at all.
+            var storeFlags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (key, value) in extraFlags)
             {
                 if (WavedAllowedFlags.IsAllowed(key))
-                    flags[key] = value;
+                    storeFlags[key] = value;
             }
+
+            // allowLocal mirrors the marker the connection-string handler records when an
+            // administrator deliberately saved local endpoints for this store: a restart re-reads
+            // persisted flags with no user attached, so the admin's decision has to come from what was
+            // stored rather than from who is asking now. A store with no marker is validated strictly,
+            // which is the case that matters - a non-admin's string could not have stored a local
+            // value in the first place.
+            var allowLocal = (await _storeRepository.GetSettingAsync<WavedStoreSettings>(storeId, WavedStoreSettings.SettingsKey))?.AllowLocalEndpoints == true;
+            if (!WavedFlagValues.Validate(storeFlags, out var flagValueError, allowLocal))
+                throw new InvalidOperationException($"Refusing to start waved for store {storeId}: {flagValueError}");
+
+            foreach (var (key, value) in storeFlags)
+                flags[key] = value;
+
             flags["datadir"] = dataDir;
             flags["rpc.listenaddr"] = $"{_config.Host}:{port}";
             flags["wallet.password_file"] = passwordFilePath;

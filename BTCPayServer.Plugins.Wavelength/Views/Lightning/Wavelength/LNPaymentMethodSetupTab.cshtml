@@ -10,7 +10,16 @@
     // the URL) - the connection string uses an opaque token instead, so reaching this store's
     // waved instance requires actually possessing this generated string, not just knowing its ID.
     // See WavedStoreTokenProtector's doc comment.
-    var token = TokenProtector.Protect(Model.StoreId);
+    //
+    // GetOrCreateTokenAsync (not a fresh encryption of the store ID on every render, which is what
+    // this page used to do): the token is an HMAC over the store ID under a seed persisted per
+    // store, so this page shows the SAME string on every visit, and the string it shows is the one
+    // that currently works. Encrypting the store ID per render produced a different, equally
+    // valid-looking string every time, none of which could be told apart from one that had since
+    // been revoked. Calling this does persist a seed for a store that had none, which is harmless
+    // on its own: a seed grants nothing until a token derived from it is saved as a connection
+    // string, and no token can be derived from a seed without it.
+    var token = await TokenProtector.GetOrCreateTokenAsync(Model.StoreId);
 }
 
 <script>
