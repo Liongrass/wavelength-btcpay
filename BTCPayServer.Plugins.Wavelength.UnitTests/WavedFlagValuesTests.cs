@@ -43,6 +43,18 @@ public class WavedFlagValuesTests
     [InlineData("http://[::1]:10029/")]
     [InlineData("http://[::]:10029/")]
     [InlineData("http://0.0.0.0:10029/")]
+    // A trailing dot is the DNS root, invisible to .NET's IPAddress.TryParse and to core's
+    // suffix rules, but Go's resolver strips it and resolves the literal - so waved would dial
+    // exactly the local address this check sees as a public name.
+    [InlineData("http://127.0.0.1./api")]
+    [InlineData("http://169.254.169.254./latest/meta-data/")]
+    [InlineData("http://localhost.:32838/")]
+    [InlineData("http://10.0.0.1./api")]
+    // IPv4 shorthand forms, which .NET 10's IPAddress.TryParse and Uri both normalize to full
+    // dotted quads - blocked by the ordinary range rules once normalized.
+    [InlineData("http://127.1/api")]
+    [InlineData("http://0x7f.0.0.1/api")]
+    [InlineData("http://2130706433/api")]
     public void LocalOrPrivateUrlsAreRejected(string url)
     {
         Assert.False(WavedFlagValues.Validate(Flags((WavedFlagValues.EsploraUrlFlag, url)), out var error));

@@ -272,4 +272,52 @@ public class WavelengthLightningConnectionStringHandlerTests
         Assert.Null(error);
         Assert.Equal(value, extraFlags[allowedKey]);
     }
+
+    // The approvals gate is not observable without a request context (see the class-level comment),
+    // but the gate's own inputs are: a save accepted only because AllowForAllStores is on must not
+    // record a durable approval - turning the setting back off must be a real revoke. What can be
+    // asserted without an HttpContext is the negative space: nothing in the no-request path writes
+    // an approval, since RecordApproval only runs for an administrator's save. This test pins that
+    // by running Create's accepting path (a background read of a valid token) and asserting no
+    // approval write happened - a regression here would mean a background consumer could mint
+    // approvals, the very stickiness the reviewer flagged.
+    [Fact]
+    public void BackgroundReadOfAValidTokenRecordsNoApproval()
+    {
+        var approvals = new FakeStoreApprovals();
+        var handler = new WavelengthLightningConnectionStringHandler(
+            null!, _tokenProtector, approvals, new FakeServerSettings(), NullLogger<WavelengthLightningConnectionStringHandler>.Instance);
+        var token = TokenFor("store-a");
+
+        // A background consumer's read: no acting store, valid current token. Every check passes and
+        // the call proceeds all the way to client construction, which is where the null service
+        // provider throws - that throw is the assertion that no gate refused, since the class-level
+        // comment already rules out a real WavedProcessManager in these tests.
+        Assert.Throws<ArgumentNullException>(() =>
+            handler.Create($"type=wavelength;token={token}", Network.Main, out _));
+
+        Assert.Equal(0, approvals.WriteCount);
+        Assert.False(approvals.IsApproved("store-a"));
+    }
+
+    [Fact]
+    public void AllowForAllStoresDoesNotBecomeADurableApproval()
+    {
+        // The same property from the settings side: AllowForAllStores is read live on every check,
+        // so flipping it off must refuse an unapproved store's next save even after the store
+        // saved once while it was on. The durable record is what RecordApproval writes, and it only
+        // runs for a server administrator - asserted at the unit level here through FakeStoreApprovals
+        // staying empty across an AllowForAllStores-accepted, non-admin save.
+        var approvals = new FakeStoreApprovals();
+        var settings = new WavelengthServerSettings { AllowForAllStores = true };
+        var handler = new WavelengthLightningConnectionStringHandler(
+            null!, _tokenProtector, approvals, new FakeServerSettings(settings), NullLogger<WavelengthLightningConnectionStringHandler>.Instance);
+        var token = TokenFor("store-a");
+
+        Assert.Throws<ArgumentNullException>(() =>
+            handler.Create($"type=wavelength;token={token}", Network.Main, out _));
+
+        Assert.Equal(0, approvals.WriteCount);
+        Assert.False(approvals.IsApproved("store-a"));
+    }
 }

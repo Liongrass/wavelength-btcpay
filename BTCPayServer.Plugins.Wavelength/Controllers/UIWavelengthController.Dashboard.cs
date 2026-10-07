@@ -156,7 +156,7 @@ public partial class UIWavelengthController
                 wavelengthConfig.ConnectionString!, out var extraFlags, out var parseError,
                 allowLocal: (await storeSettings.GetAsync(storeId, cancellationToken)).AllowLocalEndpoints))
         {
-            TempData[WellKnownTempData.ErrorMessage] = parseError;
+            TempData[WellKnownTempData.ErrorMessage] = TruncateErrorText(parseError);
             return RedirectToAction(nameof(Index), new { storeId });
         }
 

@@ -44,6 +44,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     private readonly EventAggregator _eventAggregator;
     private readonly WavedWalletCredentialStore _credentialStore;
     private readonly WavedMnemonicPendingCache _mnemonicCache;
+    private readonly WavedStoreSettingsStore _storeSettings;
     private readonly IWavelengthServerSettingsSource _serverSettings;
     private readonly ILogger<WavedProcessManager> _logger;
     private readonly string _nativeDir;
@@ -64,6 +65,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         EventAggregator eventAggregator,
         WavedWalletCredentialStore credentialStore,
         WavedMnemonicPendingCache mnemonicCache,
+        WavedStoreSettingsStore storeSettings,
         IWavelengthServerSettingsSource serverSettings,
         ILogger<WavedProcessManager> logger)
     {
@@ -72,6 +74,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
         _eventAggregator = eventAggregator;
         _credentialStore = credentialStore;
         _mnemonicCache = mnemonicCache;
+        _storeSettings = storeSettings;
         _serverSettings = serverSettings;
         _logger = logger;
 
@@ -376,6 +379,13 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
                     var storeId = Path.GetFileName(dir);
                     if (!Directory.EnumerateFileSystemEntries(dir).Any())
                         continue;
+
+                    // Warm the settings cache first, here where the read is already awaited on
+                    // an async path. The token-verification check on core's Lightning hot path
+                    // reads this row synchronously (see WavedStoreSettingsStore.GetSeed), so every
+                    // store this loop warms now is one whose first invoice after a restart does not
+                    // pay a blocking database read on the checkout path.
+                    await _storeSettings.GetAsync(storeId, stoppingToken);
 
                     if (await _storeRepository.FindStore(storeId) is null)
                     {

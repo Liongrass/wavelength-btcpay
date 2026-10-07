@@ -199,6 +199,18 @@ public static class WavedFlagValues
         // the IPv4-mapped form (::ffff:127.0.0.1), which IPAddress parses to a v4 address.
         var bare = host.StartsWith('[') && host.EndsWith(']') ? host[1..^1] : host;
 
+        // A single trailing dot - the DNS root - is invisible to every check below: .NET's
+        // IPAddress.TryParse rejects "127.0.0.1.", and core's suffix rules see a name with a dot
+        // that isn't .internal/.local/.lan, so both call it public. Go's resolver does not agree -
+        // getaddrinfo strips the root dot and resolves the literal (verified: Go resolves
+        // "127.0.0.1.", "localhost.", and "169.254.169.254." to the obvious local addresses), so
+        // waved would dial exactly the internal address this check just called public. Stripping it
+        // before every check makes the two parsers see the same host.
+        if (bare.EndsWith('.'))
+            bare = bare[..^1];
+        if (bare.Length == 0)
+            return false;
+
         if (BTCPayServer.Extensions.IsLocalNetwork(bare))
             return true;
 

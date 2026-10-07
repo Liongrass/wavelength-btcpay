@@ -25,10 +25,10 @@ public sealed class FakeStoreApprovals : IWavedStoreApprovals
 
     public bool AllowsLocalEndpoints(string storeId) => _allowLocalEndpoints.TryGetValue(storeId, out var v) && v;
 
-    public Task ApproveAsync(string storeId, bool allowLocalEndpoints, CancellationToken cancellationToken = default)
+    public Task ApproveAsync(string storeId, bool allowLocalValues, CancellationToken cancellationToken = default)
     {
         WriteCount++;
-        Approve(storeId, allowLocalEndpoints || AllowsLocalEndpoints(storeId));
+        Approve(storeId, allowLocalValues || AllowsLocalEndpoints(storeId));
         return Task.CompletedTask;
     }
 }

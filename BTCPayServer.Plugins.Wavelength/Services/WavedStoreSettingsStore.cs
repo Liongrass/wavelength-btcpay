@@ -44,11 +44,12 @@ public interface IWavedStoreApprovals
 
     /// <summary>
     /// Records that this store has been adopted, and whether it may carry local/private endpoint
-    /// values. Called on every accepted save, so the implementation is responsible for writing
-    /// nothing when neither fact would change - an ordinary Lightning operation reaches this on the
-    /// hottest path there is.
+    /// values. Called only for accepted administrator saves (see the handler's RecordApproval), so
+    /// the write happens rarely; the implementation is still responsible for writing nothing when
+    /// neither fact would change - an ordinary Lightning operation by an approved store reaches the
+    /// handler with a context attached and must not pay for a write on the hottest path there is.
     /// </summary>
-    Task ApproveAsync(string storeId, bool allowLocalEndpoints, CancellationToken cancellationToken = default);
+    Task ApproveAsync(string storeId, bool allowLocalValues, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -176,9 +177,11 @@ public sealed class WavedStoreSettingsStore(StoreRepository storeRepository) : I
 
     /// <summary>See <see cref="IWavedStoreApprovals.ApproveAsync"/> - writes only when one of the two
     /// facts actually changes, so the unauthenticated invoice path (which reaches the handler with a
-    /// request context attached, and therefore reaches this) stops at an in-memory comparison.</summary>
+    /// request context attached, and therefore reaches this) stops at an in-memory comparison.
+    /// Called only for actual administrator saves - see the handler's RecordApproval for why a
+    /// save allowed through by AllowForAllStores records nothing.</summary>
     public async Task ApproveAsync(
-        string storeId, bool allowLocalEndpoints, CancellationToken cancellationToken = default)
+        string storeId, bool allowLocalValues, CancellationToken cancellationToken = default)
     {
         var settings = await GetAsync(storeId, cancellationToken);
 
@@ -186,14 +189,14 @@ public sealed class WavedStoreSettingsStore(StoreRepository storeRepository) : I
         // a store owner must not be able to clear the record by not being an admin. AllowLocalEndpoints
         // accumulates for the same reason - an admin who allowed local endpoints and then saves a
         // string without any must not drop the marker out from under a process already using one.
-        var allowLocal = settings.AllowLocalEndpoints || allowLocalEndpoints;
+        var allowLocal = settings.AllowLocalEndpoints || allowLocalValues;
         if (settings.ServerAdminApproved && settings.AllowLocalEndpoints == allowLocal)
             return;
 
         await UpdateAsync(storeId, current => current with
         {
             ServerAdminApproved = true,
-            AllowLocalEndpoints = current.AllowLocalEndpoints || allowLocalEndpoints
+            AllowLocalEndpoints = current.AllowLocalEndpoints || allowLocalValues
         }, cancellationToken);
     }
 }

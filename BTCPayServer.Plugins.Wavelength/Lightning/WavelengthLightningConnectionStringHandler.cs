@@ -224,9 +224,16 @@ public sealed class WavelengthLightningConnectionStringHandler : ILightningConne
 
     /// <summary>
     /// Records, on the store, the two decisions that only a request context can witness: that the
-    /// store has been adopted by someone entitled to adopt it, and - when an administrator
-    /// deliberately pointed it at a local esplora, fee service, or peer - that this store's flags
-    /// may legitimately contain local addresses.
+    /// store has been adopted, and - when an administrator deliberately pointed it at a local
+    /// esplora, fee service, or peer - that this store's flags may legitimately contain local
+    /// addresses.
+    ///
+    /// Only a server administrator's own save records approval. A save that was allowed through
+    /// by the AllowForAllStores setting is deliberately NOT recorded: that setting is a server-wide
+    /// stance an administrator can flip on for a day and off again, and a store that happened to
+    /// save while it was on must not keep a private approval after it goes back off - turning the
+    /// setting off is the revoke, and nothing should survive it. A later save by an actual
+    /// administrator is what records a durable, store-specific approval.
     ///
     /// Written here rather than at the process start that follows, because the start happens later,
     /// possibly in a background loop with no user attached, and possibly not at all until the store
@@ -235,8 +242,11 @@ public sealed class WavelengthLightningConnectionStringHandler : ILightningConne
     /// work and no write.
     /// </summary>
     private void RecordApproval(string storeId, bool isServerAdmin, IReadOnlyDictionary<string, string> extraFlags)
-        => _storeApprovals.ApproveAsync(storeId, isServerAdmin && HasLocalFlagValues(extraFlags))
-            .GetAwaiter().GetResult();
+    {
+        if (isServerAdmin)
+            _storeApprovals.ApproveAsync(storeId, allowLocalValues: HasLocalFlagValues(extraFlags))
+                .GetAwaiter().GetResult();
+    }
 
     /// <summary>
     /// Whether any flag value in this set is one a non-admin save would have rejected. Used to

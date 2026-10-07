@@ -101,7 +101,9 @@ Two ways to approve:
   ```
 
   This is read at runtime (no rebuild or plugin change needed), and it overrides whatever is
-  persisted, so it is also the way to turn the requirement back off quickly.
+  persisted. Turning it off again is a real revoke for every store that never had an individual
+  approval: a save made while it was on does **not** leave a store with a private approval
+  afterward — only an administrator's own save of that store's connection string records that.
 
 A store that has not been approved sees a clear message rather than a broken page: saving a
 connection string is refused with an explanation, and the store's Wavelength dashboard says the
