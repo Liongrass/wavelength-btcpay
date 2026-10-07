@@ -75,10 +75,20 @@ public partial class UIWavelengthController
         var wavelengthConfig = GetWavelengthConfig(store);
         if (wavelengthConfig?.ConnectionString is null) return RedirectToLightningSetup(storeId);
 
-        if (!WavelengthLightningConnectionStringHandler.TryParseExtraFlags(
-                wavelengthConfig.ConnectionString, out var extraFlags, out var parseError))
+        // Starting a process is the act this gate protects, so a restart goes through it even
+        // though it is the same administrator-facing action the approval itself came from - see
+        // IsWavelengthAllowedForCurrentUserAsync.
+        if (!await IsWavelengthAllowedForCurrentUserAsync(storeId, cancellationToken))
         {
-            TempData[WellKnownTempData.ErrorMessage] = parseError;
+            TempData[WellKnownTempData.ErrorMessage] = NotApprovedMessage;
+            return RedirectToAction(nameof(Advanced), new { storeId });
+        }
+
+        if (!WavelengthLightningConnectionStringHandler.TryParseExtraFlags(
+                wavelengthConfig.ConnectionString, out var extraFlags, out var parseError,
+                allowLocal: (await storeSettings.GetAsync(storeId, cancellationToken)).AllowLocalEndpoints))
+        {
+            TempData[WellKnownTempData.ErrorMessage] = TruncateErrorText(parseError);
             return RedirectToAction(nameof(Advanced), new { storeId });
         }
 
@@ -89,9 +99,44 @@ public partial class UIWavelengthController
         }
         catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or RpcException)
         {
-            TempData[WellKnownTempData.ErrorMessage] = ex is RpcException rpcEx ? rpcEx.Status.Detail : ex.Message;
+            TempData[WellKnownTempData.ErrorMessage] =
+                TruncateErrorText(ex is RpcException rpcEx ? rpcEx.Status.Detail : ex.Message);
         }
 
+        return RedirectToAction(nameof(Advanced), new { storeId });
+    }
+
+    // Rotates this store's token seed, which is what revokes the connection string this store
+    // currently holds. Before this existed there was no way to kill one store's token at all: it
+    // was the store ID under Data Protection, so the only way to invalidate a leaked string was to
+    // rotate the instance-wide key ring - which would have taken every other store's token and
+    // wallet password with it. See WavedStoreTokenProtector.
+    //
+    // Deliberately does not rewrite or re-save the store's Lightning connection string. The old
+    // token in it stops resolving immediately, so the store's Lightning simply stops working until
+    // someone pastes the new token in - which is the point of a revoke, and which the success
+    // message says outright rather than leaving the operator to discover it from a failed payment.
+    [HttpPost("advanced/regenerate-token")]
+    public async Task<IActionResult> RegenerateToken(string storeId, CancellationToken cancellationToken)
+    {
+        var store = HttpContext.GetStoreDataOrNull();
+        if (store is null) return NotFound();
+        if (GetWavelengthConfig(store) is null) return RedirectToLightningSetup(storeId);
+
+        // An administrator, or a server that allows every store, or a store already approved -
+        // the same boundary as every other mutating action here. Revoking a token is exactly the
+        // kind of thing a store owner should be able to do for their own store, and this is how
+        // an approved store's owner does it.
+        if (!await IsWavelengthAllowedForCurrentUserAsync(storeId, cancellationToken))
+        {
+            TempData[WellKnownTempData.ErrorMessage] = NotApprovedMessage;
+            return RedirectToAction(nameof(Advanced), new { storeId });
+        }
+
+        await tokenProtector.RegenerateTokenAsync(storeId, cancellationToken);
+        TempData[WellKnownTempData.SuccessMessage] =
+            "A new token has been generated. The previous connection string no longer works - " +
+            "copy the new token from the Lightning setup page and save it there.";
         return RedirectToAction(nameof(Advanced), new { storeId });
     }
 }
