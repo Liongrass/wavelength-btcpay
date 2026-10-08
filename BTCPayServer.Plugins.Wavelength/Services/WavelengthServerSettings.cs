@@ -13,9 +13,10 @@ namespace BTCPayServer.Plugins.Wavelength.Services;
 /// wallet whose seed lives on the server. That is a decision about the *server's* resources and
 /// the *server's* custody of a seed, not about one store, so BTCPay core gates the comparable
 /// cases behind an administrator: see PoliciesSettings.AllowLightningInternalNodeForAll and
-/// AllowHotWalletForAll, which the two members below deliberately mirror. A store owner should not
-/// be able to make that decision for a server they do not administer, and should not be able to
-/// exhaust it either, which is what <see cref="MaxStoreProcesses"/> bounds.
+/// AllowHotWalletForAll - this plugin's own default deliberately does not mirror theirs (see
+/// <see cref="AllowForAllStores"/>), but the per-store approval path they mirror still exists for
+/// an operator who wants it, and <see cref="MaxStoreProcesses"/> still bounds the one thing a
+/// store owner should never be able to exhaust regardless of that default.
 /// </summary>
 public sealed class WavelengthServerSettings
 {
@@ -24,18 +25,26 @@ public sealed class WavelengthServerSettings
     /// persisted and no environment override is set. Deliberately nonzero rather than
     /// unlimited: one store per wallet is unavoidable (waved is single-wallet-per-process), but
     /// an unbounded number of attacker-created stores must not be able to fork an unbounded
-    /// number of daemons.
+    /// number of daemons. Unaffected by <see cref="AllowForAllStores"/> - this cap applies to
+    /// every store's wallet regardless of who approved it.
     /// </summary>
     public const int DefaultMaxStoreProcesses = 100;
 
     /// <summary>
-    /// Lets every store use Wavelength without an administrator approving each one. False by
-    /// default - the same default core uses for its own internal-node and hot-wallet equivalents -
-    /// so a fresh install does not hand store owners this capability until an administrator
-    /// deliberately grants it (by flipping this through the server settings, or by setting the
-    /// WAVELENGTH_ALLOW_ALL_STORES environment variable, which needs no UI).
+    /// Lets every store use Wavelength without an administrator approving each one individually.
+    /// True by default: this plugin ships as a single-purpose BTCPay store wallet backend rather
+    /// than a general-purpose plugin platform, so letting any store owner self-serve it is this
+    /// project's own deployment-wide default, not an invitation to mirror it elsewhere.
+    ///
+    /// An operator who wants the stricter, per-store-approval behaviour instead (matching how
+    /// BTCPay core gates its own internal-node and hot-wallet equivalents) sets this to false -
+    /// through the WAVELENGTH_ALLOW_ALL_STORES environment variable (see
+    /// <see cref="WavelengthServerSettingsProvider.AllowAllStoresEnvVar"/>), since this plugin
+    /// ships no server-settings page. Turning it off is a real revoke for every store that never
+    /// had an individual approval recorded; see <see cref="WavelengthServerSettingsProvider"/>'s
+    /// doc comment for why a save made while this was true does not leave one behind.
     /// </summary>
-    public bool AllowForAllStores { get; set; }
+    public bool AllowForAllStores { get; set; } = true;
 
     /// <summary>
     /// How many stores may have a waved process running at once. See
@@ -63,12 +72,12 @@ public interface IWavelengthServerSettingsSource
 /// the defaults when nothing has been saved yet) and then applies the WAVELENGTH_* environment
 /// overrides on top. The override exists because this plugin deliberately ships no server-settings
 /// page - an administrator flips these far more easily through the environment of whatever already
-/// runs BTCPay - and because the safe default is off, which without an out-of-band way to turn it on
-/// would leave a server whose operator has decided every store should have Wavelength unable to say
-/// so. The override is applied *after* the read rather than written into it: an operator's
-/// environment is a statement about this deployment, and it should win without the plugin writing a
-/// row nobody asked it to write. Mirrors WavedConfiguration's use of WAVELENGTH_* variables, so the
-/// plugin has one story for "configuration an operator sets on the container".
+/// runs BTCPay - which is also the only way to move AllowForAllStores off its true default: set
+/// WAVELENGTH_ALLOW_ALL_STORES=false (or "0"/"no") and restart. The override is applied *after* the
+/// read rather than written into it: an operator's environment is a statement about this
+/// deployment, and it should win without the plugin writing a row nobody asked it to write. Mirrors
+/// WavedConfiguration's use of WAVELENGTH_* variables, so the plugin has one story for
+/// "configuration an operator sets on the container".
 /// </summary>
 public sealed class WavelengthServerSettingsProvider(ISettingsRepository settingsRepository)
     : IWavelengthServerSettingsSource

@@ -77,15 +77,28 @@ Generate a fresh token there, save it, and that store is up to date.
 
 ## Server administration
 
-### Wavelength is opt-in, per server or per store
+### Wavelength is on for every store by default, with a stricter opt-in available
 
 Running Wavelength means the server spawns a long-lived `waved` process for a store and — once
 someone clicks **Create wallet** — holds a wallet seed on that store's behalf. That is a decision
-about the server's resources and the server's custody of a key, not about one store, so it is gated
-the way BTCPay gates its own internal Lightning node and hot wallets (**Server Settings → Policies**):
-**a store owner cannot enable Wavelength for a store unless a server administrator has approved it.**
+about the server's resources and the server's custody of a key, not about one store - BTCPay core
+gates the comparable cases (its own internal Lightning node and hot wallets) behind a server
+administrator, under **Server Settings → Policies**. This plugin's own default does **not** mirror
+that: any store owner can enable Wavelength for their own store, no administrator approval needed,
+since this plugin exists specifically to be a store wallet backend rather than a general-purpose
+capability every BTCPay operator needs to individually gate.
 
-Two ways to approve:
+An operator who wants the stricter, admin-approval-required behaviour instead can still have it.
+There is no settings page for this, so set it with an environment variable on whatever runs
+BTCPay:
+
+```bash
+WAVELENGTH_ALLOW_ALL_STORES=false
+```
+
+This is read at runtime (no rebuild or plugin change needed) and overrides whatever is persisted.
+With it set, a store owner cannot enable Wavelength for a store unless a server administrator has
+approved it first - in one of two ways:
 
 - **For one store**: a server administrator saves that store's wavelength connection string once
   (the usual first step anyway, on the store's **Lightning → Setup Lightning Node** page). The store
@@ -93,20 +106,19 @@ Two ways to approve:
   normally — nothing needs re-approving, and store owners do not have to ask again for routine
   payments, payouts, or invoice creation. Merely viewing a store's Wavelength dashboard as an
   administrator is not what grants this; the deliberate save is.
-- **For every store at once**: turn on **AllowForAllStores**. There is no settings page for this
-  yet, so set it with an environment variable on whatever runs BTCPay:
+- **For every store at once again**: set `WAVELENGTH_ALLOW_ALL_STORES=true` (or unset it, since
+  that is the default) - the per-store approvals recorded while it was off are unaffected, and
+  every store, approved or not, can use Wavelength again.
 
-  ```bash
-  WAVELENGTH_ALLOW_ALL_STORES=true
-  ```
+Turning `AllowForAllStores` off is a real revoke for every store that never had an individual
+approval: a save made while it was on does **not** leave a store with a private approval
+afterward — only an administrator's own save of that store's connection string records that. So a
+store approved only because `AllowForAllStores` was on loses access the moment it is turned back
+off, same as if it had never been approved.
 
-  This is read at runtime (no rebuild or plugin change needed), and it overrides whatever is
-  persisted. Turning it off again is a real revoke for every store that never had an individual
-  approval: a save made while it was on does **not** leave a store with a private approval
-  afterward — only an administrator's own save of that store's connection string records that.
-
-A store that has not been approved sees a clear message rather than a broken page: saving a
-connection string is refused with an explanation, and the store's Wavelength dashboard says the
+A store that has not been approved (only relevant with `AllowForAllStores` set to false) sees a
+clear message rather than a broken page: saving a connection string is refused with an
+explanation, and the store's Wavelength dashboard says the
 same thing. An administrator is never refused.
 
 ### Limiting how many waved processes run at once

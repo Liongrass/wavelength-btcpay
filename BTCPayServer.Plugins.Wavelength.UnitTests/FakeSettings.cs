@@ -35,8 +35,10 @@ public sealed class FakeStoreApprovals : IWavedStoreApprovals
 
 /// <summary>
 /// An in-memory <see cref="IWavelengthServerSettingsSource"/>. Defaults to a fresh
-/// <see cref="WavelengthServerSettings"/> - AllowForAllStores false and the process cap at its
-/// default - which is what a server that has never touched these settings presents.
+/// <see cref="WavelengthServerSettings"/> - AllowForAllStores true and the process cap at its
+/// default - which is what a server that has never touched these settings presents. Tests
+/// exercising the stricter, approval-required behaviour pass an explicit
+/// <c>new WavelengthServerSettings { AllowForAllStores = false }</c> instead.
 /// </summary>
 public sealed class FakeServerSettings(WavelengthServerSettings? settings = null) : IWavelengthServerSettingsSource
 {
