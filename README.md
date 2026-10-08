@@ -35,7 +35,12 @@ Upload that file as described below.
 3. Confirm it loaded: **Server Settings → Plugins** should list "Wavelength."
 
 By default, each store's `waved` data lives under `<BTCPay data dir>/Plugins/Wavelength/stores/`,
-listens on loopback starting at port `10029`, and defaults to `mainnet`.
+listens on loopback starting at port `10029`, and defaults to whatever network this BTCPay
+instance itself runs on (mainnet/testnet/regtest/signet) — not a separate, easy-to-forget setting
+that could silently diverge from it. Set `WAVELENGTH_NETWORK` to override this server-wide default
+explicitly: for `testnet4` or `simnet`, which BTCPay has no concept of at all, or to deliberately
+run Wavelength on a different network than the rest of the instance. A store's own connection
+string can still override the server-wide default further with its own `network=` flag.
 
 ### Backing up or migrating this instance
 
