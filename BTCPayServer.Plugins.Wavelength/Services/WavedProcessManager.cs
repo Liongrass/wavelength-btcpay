@@ -540,7 +540,16 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
                 throw new InvalidOperationException($"Refusing to start waved for store {storeId}: {flagValueError}");
 
             foreach (var (key, value) in storeFlags)
-                flags[key] = value;
+            {
+                // "server" is this plugin's connection-string-facing name for waved's own
+                // --server.host flag - see WavedOperatorServer's class doc comment for why the
+                // connection string needs that exact spelling and why the value waved actually
+                // gets differs from what was saved.
+                if (key.Equals("server", StringComparison.OrdinalIgnoreCase))
+                    flags["server.host"] = WavedOperatorServer.ToWavedFlagValue(value);
+                else
+                    flags[key] = value;
+            }
 
             flags["datadir"] = dataDir;
             flags["rpc.listenaddr"] = $"{_config.Host}:{port}";

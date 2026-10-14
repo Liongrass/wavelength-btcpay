@@ -260,6 +260,7 @@ public class WavelengthLightningConnectionStringHandlerTests
     [InlineData("wallet.esploraurl", "https://esplora.example.com/api")]
     [InlineData("wallet.feeurl", "https://fees.example.com/")]
     [InlineData("wallet.recoverywindow", "1")]
+    [InlineData("server", "https://wavelength.lightning.finance:443")]
     [InlineData("oor.maxsubmitretry", "1")]
     [InlineData("oor.limits.maxcheckpoints", "1")]
     [InlineData("unroll.bumpafterblocks", "1")]

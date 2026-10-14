@@ -1,6 +1,7 @@
 @model BTCPayServer.Models.StoreViewModels.LightningNodeViewModel
 @using BTCPayServer.Plugins.Wavelength.Services
 @inject WavedStoreTokenProtector TokenProtector
+@inject WavedConfiguration WavedConfig
 @{
     if (Model.CryptoCode != "BTC")
     {
@@ -20,6 +21,17 @@
     // on its own: a seed grants nothing until a token derived from it is saved as a connection
     // string, and no token can be derived from a seed without it.
     var token = await TokenProtector.GetOrCreateTokenAsync(Model.StoreId);
+
+    // BTCPay core's own connection-string safety check refuses to save ANY custom connection
+    // string with no "server" key for a non-admin - see WavedOperatorServer's class doc comment.
+    // Baked into every sample below so a store owner who just copies one gets a string that
+    // actually saves, rather than a confusing core-level permission error this plugin cannot
+    // customize or suppress. defaultServer matches whatever network this store's wallet would
+    // actually run on if left unset (WavedConfig.Network, itself BTCPay's own ambient network
+    // unless overridden); signetServer is always signet's, for the sample that explicitly
+    // overrides network=signet.
+    var defaultServer = WavedOperatorServer.DefaultFor(WavedConfig.Network);
+    var signetServer = WavedOperatorServer.DefaultFor("signet");
 }
 
 <script>
@@ -59,20 +71,30 @@
                 <ul class="pb-2">
                     <li class="mb-2">
                         <div class="text-muted small">Wallet: Lightweight</div>
-                        <code><b>type=</b>wavelength;<b>token=</b>@token</code>
+                        <code><b>type=</b>wavelength;<b>token=</b>@token;<b>server=</b>@defaultServer</code>
                     </li>
                     <li class="mb-2">
                         <div class="text-muted small">Wallet: Lightweight (signet)</div>
-                        <code><b>type=</b>wavelength;<b>token=</b>@token;<b>network=</b>signet</code>
+                        <code><b>type=</b>wavelength;<b>token=</b>@token;<b>network=</b>signet;<b>server=</b>@signetServer</code>
                     </li>
                     <li class="mb-2">
                         <div class="text-muted small">Wallet: Neutrino</div>
-                        <code><b>type=</b>wavelength;<b>token=</b>@token;<b>wallet.type=</b>btcwallet</code>
+                        <code><b>type=</b>wavelength;<b>token=</b>@token;<b>wallet.type=</b>btcwallet;<b>server=</b>@defaultServer</code>
                     </li>
                 </ul>
                 <p class="my-2">
                     This token is unique to this store - do not share it or reuse it for another store, and
                     generate a fresh connection string here if you ever need to move this wallet.
+                </p>
+                <p class="my-2">
+                    <code>server</code> is this store's Ark operator address - shown above with the default
+                    for its network, which is what <code>waved</code> would use anyway if this were left
+                    unset. It's required here regardless: BTCPay itself refuses to save a connection string
+                    with no <code>server</code> key unless you're a server administrator, and that check runs
+                    before this plugin ever sees the string. Only change it if you run (or were given access
+                    to) a different Ark operator for this network - and keep it matching whatever
+                    <code>network</code> you end up using, since <code>waved</code> does not cross-check the
+                    two for you.
                 </p>
                 <p class="my-2">
                     Besides <code>token</code>, a reviewed set of additional <code>waved</code> flags can be

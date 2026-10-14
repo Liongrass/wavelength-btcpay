@@ -152,9 +152,9 @@ the **Wavelength** entry for ready-made connection string samples, pre-filled wi
 to that store, e.g.:
 
 ```
-type=wavelength;token=<generated for this store>
-type=wavelength;token=<generated for this store>;network=signet
-type=wavelength;token=<generated for this store>;wallet.type=btcwallet
+type=wavelength;token=<generated for this store>;server=https://wavelength.lightning.finance:443
+type=wavelength;token=<generated for this store>;network=signet;server=https://signet.wavelength.lightning.finance:443
+type=wavelength;token=<generated for this store>;wallet.type=btcwallet;server=https://wavelength.lightning.finance:443
 ```
 
 That token is unique to this store and stable across page loads, so the string shown here is the
@@ -178,6 +178,16 @@ list is rejected rather than passed through: this plugin manages this store's is
 would otherwise let a connection string read or write an arbitrary file on the server, or expose
 a debug endpoint, rather than just configure the wallet - see `WavedAllowedFlags` in the plugin
 source for the exact list and the reasoning behind it.
+
+**`server` is required** - it is this store's Ark operator address, and its absence (not a
+Wavelength requirement at all) is refused outright by BTCPay core itself: BTCPay will not save
+*any* custom Lightning connection string with no `server` key unless the person saving it is a
+server administrator, and that check runs before this plugin ever sees the string, independent of
+the approval settings described above. The samples above already include the right default for
+each network - the same address `waved` would use anyway if `server` were left unset - so there is
+nothing to figure out for the common case. Only change it if you run (or were given access to) a
+different Ark operator, and keep it matching whichever `network` you use: `waved` does not
+cross-check the two for you.
 
 The flags that name an URL or a peer are also **checked by value**, not just by key: a
 `wallet.esploraurl`, `wallet.feeurl`, `wallet.btcwallet_peers`, or `wallet.btcwallet_addpeers` value
