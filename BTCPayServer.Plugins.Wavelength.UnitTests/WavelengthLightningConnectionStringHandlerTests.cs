@@ -301,6 +301,48 @@ public class WavelengthLightningConnectionStringHandlerTests
         Assert.False(approvals.IsApproved("store-a"));
     }
 
+    // Reproduces the bug directly: an administrator's save of a local value is recorded on the
+    // store (FakeStoreApprovals.Approve with allowLocalEndpoints: true, standing in for a prior,
+    // already-completed RecordApproval), and every LATER call to Create for that same store's saved
+    // string carries no admin request context at all - an invoice, a payout, a background poll - so
+    // isServerAdmin is false on every one of them. Before the fix, Create still passed isServerAdmin
+    // alone as allowLocal, so this local value was accepted once (by the admin) and then rejected
+    // forever after (by everyone else, which in practice is almost every call) - breaking Lightning
+    // for a store an administrator had deliberately approved. The ArgumentNullException is the same
+    // "every gate passed" signal BackgroundReadOfAValidTokenRecordsNoApproval uses: a local-address
+    // rejection would instead come back as Create returning null with a non-null error.
+    [Fact]
+    public void BackgroundReadOfAnAdminApprovedLocalValueIsStillAccepted()
+    {
+        var approvals = new FakeStoreApprovals();
+        approvals.Approve("store-a", allowLocalEndpoints: true);
+        var handler = new WavelengthLightningConnectionStringHandler(
+            null!, _tokenProtector, approvals, new FakeServerSettings(), NullLogger<WavelengthLightningConnectionStringHandler>.Instance);
+        var token = TokenFor("store-a");
+
+        Assert.Throws<ArgumentNullException>(() =>
+            handler.Create($"type=wavelength;token={token};wallet.esploraurl=http://127.0.0.1:5000/api", Network.Main, out _));
+    }
+
+    // The other half of the same fix: a store that was approved for ordinary use but never had a
+    // local value approved for it (the common case - most approved stores carry no local marker at
+    // all) must still be rejected strictly. The marker, not mere approval, is what the fix keys off.
+    [Fact]
+    public void BackgroundReadStillRejectsALocalValueTheStoreWasNeverApprovedFor()
+    {
+        var approvals = new FakeStoreApprovals();
+        approvals.Approve("store-a", allowLocalEndpoints: false);
+        var handler = new WavelengthLightningConnectionStringHandler(
+            null!, _tokenProtector, approvals, new FakeServerSettings(), NullLogger<WavelengthLightningConnectionStringHandler>.Instance);
+        var token = TokenFor("store-a");
+
+        var client = handler.Create(
+            $"type=wavelength;token={token};wallet.esploraurl=http://127.0.0.1:5000/api", Network.Main, out var error);
+
+        Assert.Null(client);
+        Assert.NotNull(error);
+    }
+
     [Fact]
     public void AllowForAllStoresDoesNotBecomeADurableApproval()
     {

@@ -43,6 +43,22 @@ public interface IWavedStoreApprovals
     bool IsApproved(string storeId);
 
     /// <summary>
+    /// Whether a server administrator has deliberately allowed this store's connection string to
+    /// carry local/private endpoint values (a LAN esplora, a local Ark operator, ...), recorded the
+    /// one time an admin's own save actually contained one - see <see cref="ApproveAsync"/>.
+    ///
+    /// This is what lets BTCPayServer.Plugins.Wavelength.Lightning.WavelengthLightningConnectionStringHandler.Create
+    /// re-validate an already-approved store's saved connection string on every later call (an invoice, a
+    /// payout, a background poll - none of which carry an administrator's own request context) and
+    /// still accept the same local value an admin was once allowed to save: the decision was made
+    /// once, by someone entitled to make it, and does not need remaking by whoever happens to be
+    /// asking now. Synchronous and cached for the same reason <see cref="IsApproved"/> is - this is
+    /// asked on every connection string this store parses, including the public, unauthenticated
+    /// checkout path.
+    /// </summary>
+    bool AllowsLocalEndpoints(string storeId);
+
+    /// <summary>
     /// Records that this store has been adopted, and whether it may carry local/private endpoint
     /// values. Called only for accepted administrator saves (see the handler's RecordApproval), so
     /// the write happens rarely; the implementation is still responsible for writing nothing when
@@ -174,6 +190,11 @@ public sealed class WavedStoreSettingsStore(StoreRepository storeRepository) : I
     /// asked on every connection string this store parses.</summary>
     public bool IsApproved(string storeId)
         => GetAsync(storeId).GetAwaiter().GetResult().ServerAdminApproved;
+
+    /// <summary>See <see cref="IWavedStoreApprovals.AllowsLocalEndpoints"/> - a cached read, same as
+    /// <see cref="IsApproved"/>.</summary>
+    public bool AllowsLocalEndpoints(string storeId)
+        => GetAsync(storeId).GetAwaiter().GetResult().AllowLocalEndpoints;
 
     /// <summary>See <see cref="IWavedStoreApprovals.ApproveAsync"/> - writes only when one of the two
     /// facts actually changes, so the unauthenticated invoice path (which reaches the handler with a

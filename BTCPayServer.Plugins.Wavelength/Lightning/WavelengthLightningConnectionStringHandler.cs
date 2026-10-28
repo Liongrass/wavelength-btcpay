@@ -128,13 +128,25 @@ public sealed class WavelengthLightningConnectionStringHandler : ILightningConne
             return null;
         }
 
-        // The value check rides along inside TryParseExtraFlags (see WavedFlagValues), and the
-        // escape hatch is passed only for a verified administrator: a value aimed at the server's own
-        // network - a cloud metadata address, this instance's NBXplorer, another store's loopback
-        // waved instance - is refused before anything is persisted or started. RecordApproval below
-        // is what carries that decision forward, since a background restart re-reads persisted flags
-        // with no user to ask.
-        if (!TryParseExtraFlags(connectionString, out var extraFlags, out error, allowLocal: isServerAdmin))
+        // The value check rides along inside TryParseExtraFlags (see WavedFlagValues). The escape
+        // hatch is isServerAdmin OR'd with this store's own persisted AllowLocalEndpoints marker -
+        // not isServerAdmin alone - because Create is re-run on every single later use of an already
+        // saved connection string, not just at the moment someone saves it: an invoice, a payout, a
+        // background poll, none of which carry an administrator's own request context (isServerAdmin
+        // is false for all of them). An admin who was once allowed to save a local value - a LAN
+        // esplora, a local Ark operator - approved it exactly once; a store whose saved string still
+        // carries that value must keep working on every later call, not just the admin's own. Without
+        // the marker here, Create would re-reject the very value it just accepted the moment anyone
+        // other than that admin (which in practice means almost every call) asked for a client again -
+        // which is exactly the bug this fixes, found by reproducing it with a valid token against an
+        // approved store carrying a local server= value. isServerAdmin still has to stay in the OR: a
+        // brand new admin save introducing a local value for the first time has nothing in the marker
+        // yet (RecordApproval below is what writes it, and only after this call succeeds), so without
+        // isServerAdmin that very save would reject itself. A non-admin's attempt to save a NEW local
+        // value is unaffected either way - the marker is false until an admin's own save sets it, so
+        // strict validation still applies to that save in full.
+        var allowLocal = isServerAdmin || _storeApprovals.AllowsLocalEndpoints(storeId);
+        if (!TryParseExtraFlags(connectionString, out var extraFlags, out error, allowLocal))
             return null;
 
         if (context is not null && actingStoreId is not null)

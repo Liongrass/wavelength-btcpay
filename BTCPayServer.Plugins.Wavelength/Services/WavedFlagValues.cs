@@ -70,13 +70,20 @@ public static class WavedFlagValues
     ///
     /// <paramref name="allowLocal"/> is the deliberate escape hatch for a server administrator who
     /// really does run esplora, a fee service, or a btcwallet peer on their own LAN. It has to be
-    /// passed explicitly at each call site, and the only call site that ever passes true is the
-    /// connection-string handler with a verified administrator behind it - a background restart
-    /// re-reading already-persisted flags has no user to check and so always validates strictly.
-    /// What carries an admin's decision past that point is
-    /// <see cref="WavedStoreSettings.AllowLocalEndpoints"/>, recorded when the string was saved, so
-    /// strictness at restart time does not silently undo a choice an admin deliberately made. See
-    /// WavelengthLightningConnectionStringHandler for both halves.
+    /// passed explicitly at each call site. Only two kinds of caller ever pass true: a verified
+    /// administrator's own request (the connection-string handler's Create, mid-save, checking the
+    /// live ambient user), and every other caller re-reading a string that already went through a
+    /// save an administrator made - the handler's own later calls to Create (an invoice, a payout, a
+    /// background poll - none of which carry that admin's request context), WavedProcessManager
+    /// re-reading persisted flags at (re)start, and the dashboard/Advanced controllers re-deriving
+    /// flags from the store's live connection string. All of those non-admin-request callers pass
+    /// <see cref="WavedStoreSettings.AllowLocalEndpoints"/> (via
+    /// <see cref="IWavedStoreApprovals.AllowsLocalEndpoints"/> or the settings row directly) rather
+    /// than a live admin check, which is what carries the admin's decision forward: a value accepted
+    /// once must keep being accepted on every later call that re-validates the same already-approved
+    /// string, not just the admin's own. A store with no marker - never approved for a local value in
+    /// the first place - validates strictly on every one of these paths, admin-request or not. See
+    /// WavelengthLightningConnectionStringHandler for where each half actually happens.
     ///
     /// Keys this class does not know about pass. That is safe only because the allowlist has already
     /// decided which keys can get here at all, and because a key added to it later is by definition
