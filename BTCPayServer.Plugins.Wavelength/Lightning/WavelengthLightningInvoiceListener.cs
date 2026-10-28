@@ -43,11 +43,17 @@ public sealed class WavelengthLightningInvoiceListener : ILightningInvoiceListen
                 if (entry.Status != EntryStatus.Complete)
                     continue;
 
+                // entry.Id is NOT the payment hash for a credit-backed receive (sub-VTXO-floor) -
+                // see WavelengthLightningClient.ResolvePaymentHash's doc comment, and CreateInvoice's
+                // for the full story. Using entry.Id here unconditionally would make BTCPay core's
+                // own LightningListener.AddPaymentCore call GetPaymentHash() on this notification
+                // and crash the entire listener loop (every other invoice this connection is
+                // watching, not just this one) the moment a credit-backed receive actually settles.
                 await _channel.Writer.WriteAsync(new LightningInvoice
                 {
                     Id = entry.Id,
                     Amount = LightMoney.Satoshis(entry.AmountSat),
-                    PaymentHash = entry.Id,
+                    PaymentHash = WavelengthLightningClient.ResolvePaymentHash(entry),
                     Status = LightningInvoiceStatus.Paid,
                     PaidAt = DateTimeOffset.FromUnixTimeSeconds(entry.UpdatedAtUnix)
                 }, ct);
