@@ -22,11 +22,12 @@ namespace BTCPayServer.Plugins.Wavelength.Services;
 /// they display - see UIWavelengthController.TruncateErrorText.
 ///
 /// server gets a stricter check than a plain host:port, and deliberately does not lean on
-/// BTCPayServer.Extensions.IsSafeLightningConnectionString the way its presence requirement does
-/// (see WavedOperatorServer's class comment) - that check validates the "server" value by parsing it
-/// as a URI and inspecting only its Host, but waved hands the same string to grpc.NewClient
-/// unparsed, and gRPC's own target syntax treats an "xyz://" prefix as *selecting a resolver*, not
-/// as part of an address it validates as a unit. A value like
+/// BTCPayServer.Extensions.IsSafe (the pinned submodule's name for core's own connection-string
+/// safety check - see WavedOperatorServer's class comment for why "server" is optional rather than
+/// required, which an earlier version of this comment got backwards) for it: core's check validates
+/// the "server" value, when present, by parsing it as a URI and inspecting only its Host, but waved
+/// hands the same string to grpc.NewClient unparsed, and gRPC's own target syntax treats an "xyz://"
+/// prefix as *selecting a resolver*, not as part of an address it validates as a unit. A value like
 /// "passthrough://8.8.8.8/127.0.0.1:10029" has a public, non-local Host ("8.8.8.8") as far as
 /// core's Uri-based check is concerned, so a non-admin can save it - but gRPC's "passthrough"
 /// resolver (registered in this exact dependency tree - see sdk/ark/inprocess.go and embedded.go,
@@ -34,7 +35,9 @@ namespace BTCPayServer.Plugins.Wavelength.Services;
 /// endpoint after the slash instead: 127.0.0.1:10029, not 8.8.8.8. Core's check and waved's actual
 /// dial target can therefore disagree completely, which is exactly the gap ValidateServer closes by
 /// rejecting anything but a bare host:port (optionally http(s)-prefixed) outright, independent of
-/// what core already allowed.
+/// what core already allowed - and independent of whether core's check even runs: in the pinned
+/// version, this plugin's own Create() is what core calls FIRST, before IsSafe ever runs (see
+/// WavedOperatorServer's class comment), so this check is the primary defense, not a backstop.
 ///
 /// What this deliberately does not do: resolve DNS. A name that looks public here can resolve to an
 /// internal address by the time waved resolves it, so this raises the cost of the attack rather

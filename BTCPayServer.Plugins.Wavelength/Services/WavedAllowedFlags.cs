@@ -35,8 +35,9 @@ public static class WavedAllowedFlags
     // Exact flag keys a store's own connection string may set, reviewed against waved/config.go:
     // none of them takes a local file/directory path, a listen/bind address, or auth material,
     // and none shares a resource across stores. The one deliberate exception is "server" - an
-    // outbound dial target BTCPay's own safety check validates for us, not a listen address or a
-    // path; see its own inline comment and WavedOperatorServer.
+    // outbound dial target this plugin validates itself (WavedFlagValues.ValidateServer), not a
+    // listen address or a path; see its own inline comment and WavedOperatorServer for why it does
+    // not lean on BTCPay's own connection-string safety check for this.
     private static readonly IReadOnlySet<string> ExactKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         // Network/backend selection and general daemon behavior.
@@ -45,10 +46,11 @@ public static class WavedAllowedFlags
         "allow-mainnet",
 
         // Not a waved flag name at all - this plugin's own connection-string-facing name for
-        // waved's --server.host (the Ark operator address), required so a non-admin's save can
-        // satisfy BTCPay core's own connection-string safety check. See WavedOperatorServer's
-        // class doc comment for the full story and why "server.host" itself is deliberately not
-        // the allowlisted spelling.
+        // waved's --server.host (the Ark operator address). Entirely optional: left unset, waved
+        // uses its own built-in per-network default. Lets a store owner point at a different Ark
+        // operator when they want one. See WavedOperatorServer's class doc comment for the full
+        // story (including why a scheme is needed if this IS set) and why "server.host" itself is
+        // deliberately not the allowlisted spelling.
         "server",
 
         // Round/registration/signing timing knobs - plain durations/counts, no I/O of their own.

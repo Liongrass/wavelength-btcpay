@@ -22,16 +22,14 @@
     // string, and no token can be derived from a seed without it.
     var token = await TokenProtector.GetOrCreateTokenAsync(Model.StoreId);
 
-    // BTCPay core's own connection-string safety check refuses to save ANY custom connection
-    // string with no "server" key for a non-admin - see WavedOperatorServer's class doc comment.
-    // Baked into every sample below so a store owner who just copies one gets a string that
-    // actually saves, rather than a confusing core-level permission error this plugin cannot
-    // customize or suppress. defaultServer matches whatever network this store's wallet would
-    // actually run on if left unset (WavedConfig.Network, itself BTCPay's own ambient network
-    // unless overridden); signetServer is always signet's, for the sample that explicitly
-    // overrides network=signet.
+    // "server" (waved's own Ark operator address) is entirely optional and deliberately left out of
+    // every sample below - see WavedOperatorServer's class doc comment for why an earlier version of
+    // this page got that backwards. defaultServer is only used in the one line further down that
+    // shows what setting a CUSTOM operator looks like, as a real, working example value rather than
+    // a placeholder - it matches whatever network this store's wallet would actually run on if
+    // "network" were left unset (WavedConfig.Network, itself BTCPay's own ambient network unless
+    // overridden).
     var defaultServer = WavedOperatorServer.DefaultFor(WavedConfig.Network);
-    var signetServer = WavedOperatorServer.DefaultFor("signet");
 }
 
 <script>
@@ -71,15 +69,15 @@
                 <ul class="pb-2">
                     <li class="mb-2">
                         <div class="text-muted small">Wallet: Lightweight</div>
-                        <code><b>type=</b>wavelength;<b>token=</b>@token;<b>server=</b>@defaultServer</code>
+                        <code><b>type=</b>wavelength;<b>token=</b>@token</code>
                     </li>
                     <li class="mb-2">
                         <div class="text-muted small">Wallet: Lightweight (signet)</div>
-                        <code><b>type=</b>wavelength;<b>token=</b>@token;<b>network=</b>signet;<b>server=</b>@signetServer</code>
+                        <code><b>type=</b>wavelength;<b>token=</b>@token;<b>network=</b>signet</code>
                     </li>
                     <li class="mb-2">
                         <div class="text-muted small">Wallet: Neutrino</div>
-                        <code><b>type=</b>wavelength;<b>token=</b>@token;<b>wallet.type=</b>btcwallet;<b>server=</b>@defaultServer</code>
+                        <code><b>type=</b>wavelength;<b>token=</b>@token;<b>wallet.type=</b>btcwallet</code>
                     </li>
                 </ul>
                 <p class="my-2">
@@ -87,16 +85,17 @@
                     generate a fresh connection string here if you ever need to move this wallet.
                 </p>
                 <p class="my-2">
-                    <code>server</code> is this store's Ark operator address - shown above with the default
-                    for its network, which is what <code>waved</code> would use anyway if this were left
-                    unset. It's required here regardless: BTCPay itself refuses to save a connection string
-                    with no <code>server</code> key unless you're a server administrator, and that check runs
-                    before this plugin ever sees the string. Only change it if you run (or were given access
-                    to) a different Ark operator for this network - and keep it matching whatever
-                    <code>network</code> you end up using, since <code>waved</code> does not cross-check the
-                    two for you. It must be a plain <code>host:port</code> (an <code>http://</code> or
-                    <code>https://</code> prefix is fine and gets stripped) and not a local or private
-                    address - anything else is refused.
+                    <code>server</code> is this store's Ark operator address. Leave it out, as above, and
+                    <code>waved</code> uses its own built-in default for whichever <code>network</code> you
+                    chose. Only set it if you want to point this store at a <em>different</em> operator, e.g.
+                    <code><b>type=</b>wavelength;<b>token=</b>@token;<b>server=</b>@defaultServer</code> - if
+                    you do, it needs an explicit <code>http://</code> or <code>https://</code> scheme even
+                    though <code>waved</code> itself only ever dials the bare <code>host:port</code> form
+                    (the scheme is stripped before it reaches <code>waved</code>): BTCPay's own save-time
+                    check additionally requires the value to parse as an absolute URL for anyone who isn't a
+                    server administrator. It also may not be a local or private address - keep it matching
+                    whatever <code>network</code> you end up using, since <code>waved</code> does not
+                    cross-check the two for you.
                 </p>
                 <p class="my-2">
                     Besides <code>token</code>, a reviewed set of additional <code>waved</code> flags can be

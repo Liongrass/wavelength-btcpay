@@ -152,9 +152,9 @@ the **Wavelength** entry for ready-made connection string samples, pre-filled wi
 to that store, e.g.:
 
 ```
-type=wavelength;token=<generated for this store>;server=https://wavelength.lightning.finance:443
-type=wavelength;token=<generated for this store>;network=signet;server=https://signet.wavelength.lightning.finance:443
-type=wavelength;token=<generated for this store>;wallet.type=btcwallet;server=https://wavelength.lightning.finance:443
+type=wavelength;token=<generated for this store>
+type=wavelength;token=<generated for this store>;network=signet
+type=wavelength;token=<generated for this store>;wallet.type=btcwallet
 ```
 
 That token is unique to this store and stable across page loads, so the string shown here is the
@@ -179,15 +179,21 @@ would otherwise let a connection string read or write an arbitrary file on the s
 a debug endpoint, rather than just configure the wallet - see `WavedAllowedFlags` in the plugin
 source for the exact list and the reasoning behind it.
 
-**`server` is required** - it is this store's Ark operator address, and its absence (not a
-Wavelength requirement at all) is refused outright by BTCPay core itself: BTCPay will not save
-*any* custom Lightning connection string with no `server` key unless the person saving it is a
-server administrator, and that check runs before this plugin ever sees the string, independent of
-the approval settings described above. The samples above already include the right default for
-each network - the same address `waved` would use anyway if `server` were left unset - so there is
-nothing to figure out for the common case. Only change it if you run (or were given access to) a
-different Ark operator, and keep it matching whichever `network` you use: `waved` does not
-cross-check the two for you.
+**`server` is optional** - leave it out, as in the samples above, and `waved` uses its own built-in
+Ark operator address for whichever `network` you chose. Only set it if you want to point this store
+at a *different* Ark operator than that default, e.g.:
+
+```
+type=wavelength;token=<generated for this store>;server=https://your-operator.example.com:443
+```
+
+If you do set it, it needs an explicit `http://` or `https://` scheme even though `waved` itself
+only ever dials the bare `host:port` form (the scheme is stripped before it reaches `waved`) -
+BTCPay core's own connection-string safety check additionally requires the value to parse as an
+absolute URL for a non-admin to save it at all; a bare `your-operator.example.com:443` is parsed as
+an opaque URI with no real host and is refused unless the person saving it is a server
+administrator, even though this plugin itself would accept it. Keep it matching whichever `network`
+you use: `waved` does not cross-check the two for you.
 
 The flags that name an URL, a peer, or the operator server are also **checked by value**, not just
 by key: a `wallet.esploraurl`, `wallet.feeurl`, `wallet.btcwallet_peers`, `wallet.btcwallet_addpeers`,
@@ -201,18 +207,19 @@ validation does not resolve DNS, so a public hostname that resolves to a private
 time still gets through: the check narrows what is reachable rather than closing the class of attack
 off entirely.
 
-`server` gets one more check on top, for everyone, admin or not: it must be a plain `host:port`
-(optionally with a leading `http://` or `https://`, which is stripped before it reaches `waved`) and
-nothing else. This isn't optional strictness — `waved` hands this value to gRPC's own dialer
-unparsed, and gRPC treats an `xyz://` prefix as *choosing a resolver*, not as part of an address
-validated as a whole. A value like `passthrough://8.8.8.8/127.0.0.1:10029` looks like it points at
-the public address `8.8.8.8` to a check that only inspects a URI's host — which is exactly how
-BTCPay core's own save-time check reads it, since it predates this plugin needing `server` to mean
-anything more specific than "an address BTCPay doesn't consider local" — but gRPC's `passthrough`
-resolver ignores that address entirely and dials the literal endpoint after the slash instead:
+When set, `server` gets one more check on top of BTCPay's own, for everyone, admin or not: this
+plugin requires it to be a plain `host:port` (optionally with a leading `http://` or `https://`,
+which is stripped before it reaches `waved`) and nothing else. This isn't optional strictness —
+`waved` hands this value to gRPC's own dialer unparsed, and gRPC treats an `xyz://` prefix as
+*choosing a resolver*, not as part of an address validated as a whole. A value like
+`passthrough://8.8.8.8/127.0.0.1:10029` looks like it points at the public address `8.8.8.8` to a
+check that only inspects a URI's host — which is exactly how BTCPay core's own check reads it too,
+since it was never written with gRPC's target syntax in mind — but gRPC's `passthrough` resolver
+ignores that address entirely and dials the literal endpoint after the slash instead:
 `127.0.0.1:10029`, reaching another store's `waved` instance on loopback rather than anything public.
-Rejecting any shape but a bare host:port closes that off rather than relying on a check that was
-never written with gRPC's target syntax in mind.
+This plugin's own check closes that off regardless of what BTCPay's check does or does not catch -
+and regardless of whether BTCPay's check even runs before this plugin sees the string in the first
+place, which depends on the exact BTCPay Server version in use.
 
 **Before switching a store's wallet backend or network, delete its existing wallet first** —
 `waved` can't switch backend or network on an existing wallet in place. Changing flags on an
