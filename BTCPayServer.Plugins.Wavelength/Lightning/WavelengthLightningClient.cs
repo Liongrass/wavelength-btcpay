@@ -58,8 +58,23 @@ public sealed class WavelengthLightningClient(
             Memo = createInvoiceRequest.Description ?? string.Empty
         }, cancellationToken: cancellation);
 
-        // entry.Id is the Lightning payment hash for swap-backed receive rows (see
-        // WalletEntry.id doc comment in wallet.proto) - no BOLT11 parsing needed to recover it.
+        // entry.Id is the Lightning payment hash ONLY for a normal, swap-backed receive row - NOT
+        // for a credit-backed one. wallet.proto's own doc comment on WalletEntry.id spells this
+        // out: "Credit-backed RECV rows use the credit operation id ...; the payment_hash lives on
+        // recv progress/detail instead." A credit-backed receive happens whenever the requested
+        // amount is below the operator's advertised VTXO floor (see waved's
+        // swapwallet/recv.go:recvCredit) - a real, common case, not a corner one. Using entry.Id as
+        // PaymentHash unconditionally here used to make BTCPay core's own
+        // LightningExtensions.GetPaymentHash call uint256.Parse on a credit operation id instead of
+        // a payment hash, throwing "A uint256 must be 64 characters" and silently failing to
+        // activate Lightning as a payment method for any invoice under the floor - while this exact
+        // same RecvAsync call succeeded underneath it, which is why neither waved's log nor a
+        // manual Receive from this store's own dashboard (which never parses PaymentHash) ever
+        // showed anything wrong. ResolvePaymentHash reads the real hash from
+        // entry.Request.LightningInvoice.PaymentHash, which both the normal and credit-backed
+        // construction paths populate identically (see requestFromSwapSummary and
+        // creditReceiveEntry in swapwallet/normalize.go and recv.go), falling back to entry.Id only
+        // for the ordinary case where that already IS the payment hash.
         //
         // ExpiresAt, however, DOES need the BOLT11 parsed: RecvRequest has no expiry field at
         // all (wallet.proto's own doc comment on the Recv RPC says the swap subsystem "owns...
@@ -79,7 +94,7 @@ public sealed class WavelengthLightningClient(
             Id = response.Entry.Id,
             Amount = createInvoiceRequest.Amount,
             BOLT11 = response.Invoice,
-            PaymentHash = response.Entry.Id,
+            PaymentHash = ResolvePaymentHash(response.Entry),
             Status = LightningInvoiceStatus.Unpaid,
             ExpiresAt = expiresAt
         };
@@ -283,11 +298,23 @@ public sealed class WavelengthLightningClient(
         return $"type=wavelength;token={token}{extra}";
     }
 
+    /// <summary>
+    /// The real Lightning payment hash for entry, which is NOT always entry.Id - see CreateInvoice's
+    /// doc comment for why. entry.Request.LightningInvoice.PaymentHash carries the actual hash on
+    /// both the normal and credit-backed construction paths (requestFromSwapSummary and
+    /// creditReceiveEntry, both in the wavelength repo), so it is always preferred when present; the
+    /// fallback to entry.Id covers only the ordinary case where that already IS the payment hash.
+    /// </summary>
+    internal static string ResolvePaymentHash(WalletEntry entry)
+        => !string.IsNullOrEmpty(entry.Request?.LightningInvoice?.PaymentHash)
+            ? entry.Request.LightningInvoice.PaymentHash
+            : entry.Id;
+
     private static LightningInvoice ToLightningInvoice(WalletEntry entry) => new()
     {
         Id = entry.Id,
         Amount = LightMoney.Satoshis(Math.Abs(entry.AmountSat)),
-        PaymentHash = entry.Id,
+        PaymentHash = ResolvePaymentHash(entry),
         Status = entry.Status switch
         {
             EntryStatus.Complete => LightningInvoiceStatus.Paid,
