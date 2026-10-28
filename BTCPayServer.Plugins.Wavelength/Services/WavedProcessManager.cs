@@ -195,10 +195,13 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     /// than over every store that has ever started one, so a server that has churned through many
     /// stores does not accumulate a permanent debt against the ceiling.
     ///
-    /// A store that is already running returns false - no slot reserved, and none to release -
-    /// because it needs none: see RestartAsync's doc comment for why the restart of an
-    /// already-running store must always proceed regardless of the ceiling, using the slot that
-    /// store's own still-running process already occupies rather than a second one of its own.
+    /// A store that is already running returns false - no slot reserved, and none to release.
+    /// EnsureStartedAsync, the only caller, never actually reaches this in that state (it returns
+    /// earlier - see the IsRunning check above its own call site), so this is a defensive
+    /// fallback rather than a path EnsureStartedAsync relies on. RestartAsync does NOT call this
+    /// method - see <see cref="ReserveOrCarryOverSlotForRestartAsync"/> for why a restart needs its
+    /// own variant instead of treating "already running" as "nothing to reserve" the way this one
+    /// does.
     ///
     /// Every start path reaches this, including the startup pre-warm and the crash-restart loop -
     /// both call EnsureStartedAsync rather than StartStoreAsync. A store already running is never
@@ -214,31 +217,91 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
 
         lock (_processCountLock)
         {
-            var running = GetRunningStoreIds().Count + _startingStoreIds.Count;
-            if (running >= settings.MaxStoreProcesses)
-            {
-                _logger.LogWarning(
-                    "Refusing to start waved for store {StoreId}: {Running} processes are already " +
-                    "running or starting, which is at the configured limit of {Limit}",
-                    storeId, running, settings.MaxStoreProcesses);
+            ReserveNewSlot(storeId, settings);
+        }
 
-                throw new InvalidOperationException(
-                    $"The limit of {settings.MaxStoreProcesses} running waved processes has been reached. " +
-                    "Stop another store's Wavelength wallet, or ask the server administrator to raise the " +
-                    "limit in the server settings.");
+        return true;
+    }
+
+    /// <summary>
+    /// RestartAsync's own variant of <see cref="ReserveProcessSlotAsync"/>, always leaving a slot
+    /// held for storeId - callers can therefore always call <see cref="ReleaseProcessSlot"/>
+    /// unconditionally afterward, unlike ReserveProcessSlotAsync's bool-gated release.
+    ///
+    /// Why RestartAsync cannot just reuse ReserveProcessSlotAsync as-is: a restart of an
+    /// already-running store stops the old process and starts a new one, and for the window
+    /// between those two steps the store is in neither _stores nor _startingStoreIds - it does not
+    /// count against the ceiling at all. A different store's own ReserveProcessSlotAsync, running
+    /// concurrently under ITS OWN per-store lock (which has nothing to do with this store's), can
+    /// see that gap, find room for one more, and start - and by the time this restart's new process
+    /// comes up, both stores are running against a ceiling that only ever had room for one of them.
+    /// Observed concretely with a limit of 1, store A running, and a concurrent first start of
+    /// store B: A's restart finds IsRunning(A) true and would (with the old ReserveProcessSlotAsync
+    /// behaviour) reserve nothing at all before stopping A, opening exactly that gap for B.
+    ///
+    /// Closed by moving storeId into _startingStoreIds BEFORE it is ever removed from _stores,
+    /// rather than treating "already running" as "nothing to reserve": for the entire restart, from
+    /// this call until ReleaseProcessSlot, the slot is held continuously, whether the bookkeeping
+    /// backing it at any given instant is "this store is in _stores" (not yet stopped) or "this
+    /// store is in _startingStoreIds" (stopped, or not started yet). No capacity check applies when
+    /// carrying over an already-running store's own slot this way - it is not claiming a new one,
+    /// only continuing to hold the one its own running process already occupies - which is exactly
+    /// why a restart must always be allowed to proceed regardless of the ceiling. A store that was
+    /// NOT already running (restarting a stopped one) has no existing slot to carry over, so this
+    /// falls back to the ordinary capacity-checked reservation instead, identical to a first start.
+    /// </summary>
+    private async Task ReserveOrCarryOverSlotForRestartAsync(string storeId, CancellationToken cancellationToken)
+    {
+        if (IsRunning(storeId))
+        {
+            lock (_processCountLock)
+            {
+                _startingStoreIds.Add(storeId);
             }
 
-            _startingStoreIds.Add(storeId);
-            return true;
+            return;
+        }
+
+        var settings = await _serverSettings.GetAsync(cancellationToken);
+
+        lock (_processCountLock)
+        {
+            ReserveNewSlot(storeId, settings);
         }
     }
 
     /// <summary>
-    /// Releases the slot <see cref="ReserveProcessSlotAsync"/> reserved for storeId. Called from a
-    /// finally block covering the entire start attempt, so it runs whether that attempt succeeded
-    /// or threw - a reservation that outlived a failed start would permanently shrink the ceiling
-    /// by one for no reason, and one released too early would let a concurrent start on another
-    /// store squeeze in before this store's process has actually finished coming up.
+    /// The capacity check and reservation shared by <see cref="ReserveProcessSlotAsync"/> and
+    /// <see cref="ReserveOrCarryOverSlotForRestartAsync"/>'s "not already running" branch - both of
+    /// which are claiming a genuinely new slot rather than carrying over one a running process
+    /// already holds. Must be called with <see cref="_processCountLock"/> already held.
+    /// </summary>
+    private void ReserveNewSlot(string storeId, WavelengthServerSettings settings)
+    {
+        var running = GetRunningStoreIds().Count + _startingStoreIds.Count;
+        if (running >= settings.MaxStoreProcesses)
+        {
+            _logger.LogWarning(
+                "Refusing to start waved for store {StoreId}: {Running} processes are already " +
+                "running or starting, which is at the configured limit of {Limit}",
+                storeId, running, settings.MaxStoreProcesses);
+
+            throw new InvalidOperationException(
+                $"The limit of {settings.MaxStoreProcesses} running waved processes has been reached. " +
+                "Stop another store's Wavelength wallet, or ask the server administrator to raise the " +
+                "limit in the server settings.");
+        }
+
+        _startingStoreIds.Add(storeId);
+    }
+
+    /// <summary>
+    /// Releases the slot <see cref="ReserveProcessSlotAsync"/> or
+    /// <see cref="ReserveOrCarryOverSlotForRestartAsync"/> reserved for storeId. Called from a
+    /// finally block covering the entire start (or restart) attempt, so it runs whether that
+    /// attempt succeeded or threw - a reservation that outlived it would permanently shrink the
+    /// ceiling by one for no reason, and one released too early would let a concurrent start on
+    /// another store squeeze in before this store's process has actually finished coming up.
     /// </summary>
     private void ReleaseProcessSlot(string storeId)
     {
@@ -268,11 +331,14 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
             // running must never leave it stopped: its own process is one of the ones being counted
             // against the ceiling, so with the ceiling reached it would be stopped, refused, and left
             // down - a state no one asked for and nothing would bring back until the next visit.
-            // Asked first, while the store is still running, ReserveProcessSlotAsync returns false
-            // (see its doc comment) - the store's own slot still counts for it and the restart always
-            // proceeds. A store that was NOT already running (restarting a stopped one) reserves a
-            // real slot here instead, same as a first start would.
-            var reservedSlot = await ReserveProcessSlotAsync(storeId, cancellationToken);
+            // Asked first, while the store is still running, this carries the store's existing slot
+            // through the stop/start window below rather than letting it briefly disappear - see
+            // ReserveOrCarryOverSlotForRestartAsync's doc comment for the different-store race that
+            // otherwise opens up. A store that was NOT already running (restarting a stopped one)
+            // reserves a real slot here instead, same as a first start would. Either way, something
+            // is always held from here until the release below - unlike EnsureStartedAsync's
+            // ReserveProcessSlotAsync, there is no bool to check first.
+            await ReserveOrCarryOverSlotForRestartAsync(storeId, cancellationToken);
             try
             {
                 await PersistFlagsAsync(storeId, extraFlags, cancellationToken);
@@ -290,8 +356,7 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
             }
             finally
             {
-                if (reservedSlot)
-                    ReleaseProcessSlot(storeId);
+                ReleaseProcessSlot(storeId);
             }
         }
         finally
