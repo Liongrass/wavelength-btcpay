@@ -152,9 +152,9 @@ the **Wavelength** entry for ready-made connection string samples, pre-filled wi
 to that store, e.g.:
 
 ```
-type=wavelength;token=<generated for this store>
-type=wavelength;token=<generated for this store>;network=signet
-type=wavelength;token=<generated for this store>;wallet.type=btcwallet
+type=wavelength;token=<generated for this store>;server=https://wavelength.lightning.finance:443
+type=wavelength;token=<generated for this store>;network=signet;server=https://signet.wavelength.lightning.finance:443
+type=wavelength;token=<generated for this store>;wallet.type=btcwallet;server=https://wavelength.lightning.finance:443
 ```
 
 That token is unique to this store and stable across page loads, so the string shown here is the
@@ -179,21 +179,26 @@ would otherwise let a connection string read or write an arbitrary file on the s
 a debug endpoint, rather than just configure the wallet - see `WavedAllowedFlags` in the plugin
 source for the exact list and the reasoning behind it.
 
-**`server` is optional** - leave it out, as in the samples above, and `waved` uses its own built-in
-Ark operator address for whichever `network` you chose. Only set it if you want to point this store
-at a *different* Ark operator than that default, e.g.:
+**`server` is this store's Ark operator address.** Whether it's strictly *required* depends on which
+BTCPay Server version you run: this plugin's own code never requires it (leave it out and `waved`
+uses its own built-in default for whichever `network` you chose), and the exact BTCPay Server
+version this plugin is built against (v2.4.2) doesn't require it either - but BTCPay's current
+release line does, refusing to save *any* custom Lightning connection string with no `server` key
+at all unless the person saving it is a server administrator, and that check runs before this plugin
+ever sees the string on that version. Since most real deployments are closer to that version than to
+the exact one this plugin is pinned to, the samples above include `server` with the right default
+for each network - the same address `waved` would use anyway if `server` were left unset - so there
+is nothing to figure out for the common case, and the samples work regardless of which BTCPay Server
+version you're on. Only change the value if you run (or were given access to) a different Ark
+operator, and keep it matching whichever `network` you use: `waved` does not cross-check the two for
+you.
 
-```
-type=wavelength;token=<generated for this store>;server=https://your-operator.example.com:443
-```
-
-If you do set it, it needs an explicit `http://` or `https://` scheme even though `waved` itself
-only ever dials the bare `host:port` form (the scheme is stripped before it reaches `waved`) -
-BTCPay core's own connection-string safety check additionally requires the value to parse as an
-absolute URL for a non-admin to save it at all; a bare `your-operator.example.com:443` is parsed as
-an opaque URI with no real host and is refused unless the person saving it is a server
-administrator, even though this plugin itself would accept it. Keep it matching whichever `network`
-you use: `waved` does not cross-check the two for you.
+If you do set a custom value, it needs an explicit `http://` or `https://` scheme even though
+`waved` itself only ever dials the bare `host:port` form (the scheme is stripped before it reaches
+`waved`) - BTCPay's own save-time check (on every version) additionally requires the value to parse
+as an absolute URL for a non-admin to save it at all; a bare `your-operator.example.com:443` is
+parsed as an opaque URI with no real host and is refused unless the person saving it is a server
+administrator, even though this plugin itself would accept it.
 
 The flags that name an URL, a peer, or the operator server are also **checked by value**, not just
 by key: a `wallet.esploraurl`, `wallet.feeurl`, `wallet.btcwallet_peers`, `wallet.btcwallet_addpeers`,

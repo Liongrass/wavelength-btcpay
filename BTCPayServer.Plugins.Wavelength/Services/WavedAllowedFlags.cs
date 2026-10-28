@@ -46,10 +46,12 @@ public static class WavedAllowedFlags
         "allow-mainnet",
 
         // Not a waved flag name at all - this plugin's own connection-string-facing name for
-        // waved's --server.host (the Ark operator address). Entirely optional: left unset, waved
-        // uses its own built-in per-network default. Lets a store owner point at a different Ark
-        // operator when they want one. See WavedOperatorServer's class doc comment for the full
-        // story (including why a scheme is needed if this IS set) and why "server.host" itself is
+        // waved's --server.host (the Ark operator address). Left unset, waved uses its own built-in
+        // per-network default - this plugin's own code never requires this key - but whether a
+        // non-admin CAN leave it unset at all depends on exactly which BTCPay Server version is
+        // running, which is why the setup page's samples include it regardless. See
+        // WavedOperatorServer's class doc comment for the full story (the version difference, why a
+        // scheme is always needed when this key is present) and why "server.host" itself is
         // deliberately not the allowlisted spelling.
         "server",
 

@@ -5,39 +5,47 @@ namespace BTCPayServer.Plugins.Wavelength.Services;
 /// plugin surfaces on a store's connection string under the plain key "server" rather than
 /// "server.host" itself.
 ///
-/// "server" is entirely OPTIONAL, not required. An earlier version of this comment (and of the
-/// README/setup-tab text) claimed BTCPay core's own connection-string safety check
-/// (BTCPayServer.Extensions.IsSafe, run by LightningLikePaymentHandler.ValidatePaymentMethodConfig)
-/// refuses to save any connection string with no "server" key at all. That is true of core's
-/// current `master` branch, but it is NOT true of the exact BTCPay Server version this plugin is
-/// pinned to and built against (see the `btcpayserver` submodule, currently v2.4.2): there,
-/// `Extensions.IsSafe` returns true (safe) precisely when the "server" key is ABSENT -
-/// `if (!kv.TryGetValue("server", out var server)) return true;` - so the plain
-/// "type=wavelength;token=..." shape this plugin shipped with before "server" existed saves and
-/// works for a non-admin exactly as before, with no "server" key needed at all. Verified directly
-/// against BTCPayServer/Extensions.cs in the pinned submodule, not inferred from core's newer
-/// behaviour.
+/// Whether "server" is required for a non-admin to save a connection string at all depends on
+/// exactly which BTCPay Server version is running - a genuine, confirmed difference between
+/// versions, not a single fact this comment can state once:
 ///
-/// The ordering claim this comment also used to make was backwards for the pinned version too:
-/// ValidatePaymentMethodConfig calls `_lightningClientFactory.Create(config.ConnectionString, ...)`
-/// - reaching WavelengthLightningConnectionStringHandler.Create, and therefore this plugin's own
-/// token/approval/allowlist/value checks - BEFORE it ever calls `client.IsSafe(...)`. So in the
-/// pinned version, core's safety check is an additional veto layered ON TOP of whatever this plugin
-/// already approved, not a gate this plugin's own approval model sits behind. This plugin's own
-/// checks (WavedAllowedFlags, WavedFlagValues) are the primary defense regardless of what core's
-/// check does or does not require.
+///  - The exact version this plugin is pinned to and built against (the `btcpayserver` submodule,
+///    currently v2.4.2) does NOT require it: `BTCPayServer.Extensions.IsSafe` there returns true
+///    (safe) precisely when the "server" key is absent -
+///    `if (!kv.TryGetValue("server", out var server)) return true;` - and
+///    LightningLikePaymentHandler.ValidatePaymentMethodConfig calls
+///    `_lightningClientFactory.Create(...)` (reaching this plugin's own Create, and therefore its
+///    own token/approval/allowlist/value checks) BEFORE it ever calls `client.IsSafe(...)`. Both
+///    verified directly against the pinned submodule's source, not inferred.
+///  - BTCPay core's current release line (its `master` branch at the time of writing, and - by a
+///    store owner's own reproduction - whatever more recent official release they were actually
+///    running) DOES require it: the equivalent check there,
+///    `BTCPayServer.Extensions.IsSafeLightningConnectionString`, returns false (unsafe) when
+///    "server" is absent, and `LightningLikePaymentHandler.ValidatePaymentMethodConfig` calls that
+///    check directly on the raw connection string BEFORE this plugin's Create is ever reached -
+///    the exact ordering this comment used to wrongly claim for the pinned version too. A non-admin
+///    store owner who saves this plugin's old "type=wavelength;token=..." shape (no "server" key)
+///    against a BTCPay Server running that version is refused outright, with core's own generic
+///    error naming none of this plugin's actual concerns ("...should not contain parameters ending
+///    in 'filepath' or 'directorypath', use custom LND TLS handling, point to a local endpoint, or
+///    use a DNS name for a non-HTTP endpoint.") - and this plugin cannot intercept, customize, or
+///    work around that refusal, since it never even sees the connection string.
 ///
-/// What IS still true, and is this class's actual reason to exist: a store owner who wants to point
-/// at a DIFFERENT Ark operator than waved's own built-in default has to write that value as
-/// something `new Uri(value, UriKind.Absolute)` parses into a real host - an absolute http(s) URL,
-/// in practice - rather than a bare "host:port". A bare value like
-/// "wavelength.lightning.finance:443" parses as an opaque URI whose "scheme" is
+/// Because real-world BTCPay Server deployments are far more likely to be running something close
+/// to that second version than the exact pinned submodule, the setup page's samples and the README
+/// include "server" with a real default value in every one of them - not because this plugin or the
+/// pinned core version requires it, but because leaving it out breaks a plain copy-paste on the
+/// BTCPay Server versions a store owner is actually likely to be running.
+///
+/// Either way, a store owner who wants to point at a DIFFERENT Ark operator than waved's own
+/// built-in default has to write that value as something `new Uri(value, UriKind.Absolute)` parses
+/// into a real host - an absolute http(s) URL, in practice - rather than a bare "host:port". A bare
+/// value like "wavelength.lightning.finance:443" parses as an opaque URI whose "scheme" is
 /// "wavelength.lightning.finance" and whose host is empty, which fails core's own
-/// Utils.TryParseEndpoint(uri.DnsSafeHost, ...) check and makes IsSafe return false - requiring
-/// btcpay.server.canmodifyserversettings to save it, even though it is exactly as safe as the
-/// equivalent https:// value and even though waved itself only ever wants the bare form. So: no
-/// scheme needed if "server" is left out entirely (the common case); a scheme is needed if a store
-/// owner chooses to override the default with their own operator address.
+/// Utils.TryParseEndpoint(uri.DnsSafeHost, ...) check on both versions above and makes the safety
+/// check return false - requiring btcpay.server.canmodifyserversettings to save it, even though it
+/// is exactly as safe as the equivalent https:// value and even though waved itself only ever wants
+/// the bare form.
 ///
 /// This is also the one allowlisted flag where the connection-string key and the waved flag it
 /// maps to genuinely differ (every other WavedAllowedFlags entry is used verbatim as the literal
@@ -69,18 +77,18 @@ namespace BTCPayServer.Plugins.Wavelength.Services;
 public static class WavedOperatorServer
 {
     /// <summary>
-    /// The default public Ark operator endpoint for a network - the same one waved itself resolves
-    /// when "server" (--server.host) is left unset entirely, which is the ordinary case: see the
-    /// class doc comment for why leaving "server" out altogether needs no scheme, no admin, and no
-    /// special handling at all. Returned in the "https://host:port" shape purely as a convenience
-    /// for the ONE place this is actually used - the setup page's optional "point at a different
-    /// operator" example - so that example shows a real, working address rather than a placeholder,
-    /// and already has the scheme a store owner would need if they typed it themselves (see the
-    /// class doc comment for why a scheme is needed only in that optional case).
+    /// The default public Ark operator endpoint for a network, in the "https://host:port" shape a
+    /// connection string's "server" key needs (see the class doc comment for why the scheme
+    /// matters here specifically, unlike waved's own bare host:port default). Used to pre-fill this
+    /// store's connection-string samples on the setup page: waved resolves the identical default
+    /// itself when server.host is left unset, so this exists purely so the string a store owner
+    /// actually saves already satisfies core's own safety check on the BTCPay Server versions that
+    /// have one, rather than depending on which exact version happens to be running.
     ///
     /// regtest and simnet have no public operator deployment - their default is waved's own
-    /// loopback dev address. Shown here anyway for completeness; nobody needs to type it, since it
-    /// is also what waved falls back to on its own.
+    /// loopback dev address, which will not satisfy a non-admin save on a BTCPay Server version that
+    /// requires "server" at all. That is an acceptable gap: those networks are for local
+    /// development, where whoever is setting it up is ordinarily the server admin already.
     ///
     /// Verified against waved/config.go's defaultNetworkEndpoints (the gRPC addresses - empty
     /// transport selects gRPC, waved's own default). Source commit for this is the one vendored at
