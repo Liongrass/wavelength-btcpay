@@ -259,6 +259,68 @@ public class WavedFlagValuesTests
     }
 
     [Theory]
+    [InlineData("https://wavelength.lightning.finance:443")]
+    [InlineData("http://wavelength.lightning.finance:443")]
+    [InlineData("wavelength.lightning.finance:443")]
+    [InlineData("HTTPS://wavelength.lightning.finance:443")]
+    [InlineData("203.0.113.10:10010")]
+    [InlineData("[2001:db8::1]:10010")]
+    public void PublicServerValuesAreAccepted(string value)
+    {
+        Assert.True(WavedFlagValues.Validate(Flags((WavedFlagValues.ServerFlag, value)), out var error));
+        Assert.Null(error);
+    }
+
+    [Theory]
+    [InlineData("http://127.0.0.1:10029")]
+    [InlineData("https://10.0.0.5:10010")]
+    [InlineData("169.254.169.254:443")]
+    [InlineData("localhost:10029")]
+    public void LocalOrPrivateServerValuesAreRejected(string value)
+    {
+        Assert.False(WavedFlagValues.Validate(Flags((WavedFlagValues.ServerFlag, value)), out var error));
+        Assert.Contains(WavedFlagValues.ServerFlag, error);
+    }
+
+    [Theory]
+    // The exact bypass this check exists to close: a public, non-local authority in front of the
+    // slash satisfies a Uri.Host-only check (which is all BTCPay core's own save-time check looks
+    // at), but gRPC's "passthrough" resolver - genuinely registered in this dependency tree, see
+    // sdk/ark/inprocess.go and embedded.go, which both dial "passthrough:///bufnet" - ignores that
+    // authority and dials the literal endpoint after the slash instead.
+    [InlineData("passthrough://8.8.8.8/127.0.0.1:10029")]
+    // Any other gRPC resolver scheme is just as much not a bare host:port - "dns" would at least
+    // perform a real lookup of the embedded host rather than dialing it literally, but it is still
+    // not the shape this flag is documented to accept, and there is no legitimate reason for a
+    // connection string to need it.
+    [InlineData("dns://8.8.8.8/internal-host:10029")]
+    [InlineData("unix:///var/run/other-store.sock")]
+    // A slash with no scheme at all is just as much not a bare host:port.
+    [InlineData("wavelength.lightning.finance:443/extra")]
+    public void ValuesWithAnEmbeddedSchemeOrPathAreRejectedRegardlessOfTheHostTheyAppearToName(string value)
+    {
+        Assert.False(WavedFlagValues.Validate(Flags((WavedFlagValues.ServerFlag, value)), out var error));
+        Assert.NotNull(error);
+
+        // Not just rejected - rejected for everyone, since an administrator has no legitimate need
+        // for this shape either (see ValidateServer's doc comment).
+        Assert.False(WavedFlagValues.Validate(Flags((WavedFlagValues.ServerFlag, value)), out error, allowLocal: true));
+        Assert.NotNull(error);
+    }
+
+    [Fact]
+    public void AllowLocalLetsAnAdministratorPointServerAtAPrivateOperator()
+    {
+        Assert.False(WavedFlagValues.Validate(
+            Flags((WavedFlagValues.ServerFlag, "10.0.0.5:10010")), out var rejected, allowLocal: false));
+        Assert.NotNull(rejected);
+
+        Assert.True(WavedFlagValues.Validate(
+            Flags((WavedFlagValues.ServerFlag, "10.0.0.5:10010")), out var allowed, allowLocal: true));
+        Assert.Null(allowed);
+    }
+
+    [Theory]
     [InlineData("peer.example.com:9735", "peer.example.com", 9735)]
     [InlineData("peer.example.com:1", "peer.example.com", 1)]
     [InlineData("[2001:db8::1]:65535", "[2001:db8::1]", 65535)]

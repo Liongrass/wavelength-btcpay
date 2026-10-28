@@ -26,9 +26,20 @@ namespace BTCPayServer.Plugins.Wavelength.Services;
 /// treated the whole server.* namespace as operator-only: server.host alone was never the
 /// primitive that made that namespace dangerous - that was server.macaroonpath (read an arbitrary
 /// file and attach it as the outbound macaroon to this exact address), which stays off the
-/// allowlist entirely. And a non-admin pointing "server" at a local/private address is refused by
-/// BTCPay's own check before this plugin ever sees it, since that is exactly the same check this
-/// value has to pass to be saved at all - no separate WavedFlagValues rule is needed for it.
+/// allowlist entirely.
+///
+/// BTCPay's own check does NOT cover this value the way it covers an ordinary HTTP(S) flag, despite
+/// requiring it to be present: it validates the "server" value by parsing it as a URI and checking
+/// only its Host, but waved hands the same string to grpc.NewClient unparsed, and gRPC's own target
+/// syntax treats a "scheme://" prefix as selecting a resolver rather than as part of an address
+/// validated as a whole - a value can have a public, non-local Host by core's reckoning while gRPC
+/// actually dials a completely different, attacker-chosen endpoint buried after the slash (e.g.
+/// "passthrough://8.8.8.8/127.0.0.1:10029" - core sees host 8.8.8.8, gRPC's passthrough resolver,
+/// genuinely registered in this dependency tree (see sdk/ark/inprocess.go and embedded.go, which
+/// both dial "passthrough:///bufnet"), dials 127.0.0.1:10029 instead). See
+/// WavedFlagValues.ValidateServer, which is the check that actually closes this - it does not reuse
+/// core's check or ValidateUrl, and rejects anything but a bare, optionally http(s)-prefixed
+/// host:port outright before even looking at whether the host is local.
 /// </summary>
 public static class WavedOperatorServer
 {

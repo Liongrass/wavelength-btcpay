@@ -94,7 +94,9 @@
                     before this plugin ever sees the string. Only change it if you run (or were given access
                     to) a different Ark operator for this network - and keep it matching whatever
                     <code>network</code> you end up using, since <code>waved</code> does not cross-check the
-                    two for you.
+                    two for you. It must be a plain <code>host:port</code> (an <code>http://</code> or
+                    <code>https://</code> prefix is fine and gets stripped) and not a local or private
+                    address - anything else is refused.
                 </p>
                 <p class="my-2">
                     Besides <code>token</code>, a reviewed set of additional <code>waved</code> flags can be

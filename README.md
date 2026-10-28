@@ -189,16 +189,30 @@ nothing to figure out for the common case. Only change it if you run (or were gi
 different Ark operator, and keep it matching whichever `network` you use: `waved` does not
 cross-check the two for you.
 
-The flags that name an URL or a peer are also **checked by value**, not just by key: a
-`wallet.esploraurl`, `wallet.feeurl`, `wallet.btcwallet_peers`, or `wallet.btcwallet_addpeers` value
-that points at a local or private address — loopback, an RFC1918 or link-local address (including
-`169.254.169.254`), an IPv6 link-local or unique-local address, or a `.internal`/`.local`/`.lan`
-name — is refused, because `waved` runs on the server and would otherwise be a way to make the
-server itself fetch or connect to addresses on its own internal network. A server administrator
-saving such a value is allowed to (they may genuinely run their own esplora or a bitcoind peer on
-their LAN); anyone else asks their administrator. Note that this validation does not resolve DNS, so
-a public hostname that resolves to a private address at fetch time still gets through: the check
-narrows what is reachable rather than closing the class of attack off entirely.
+The flags that name an URL, a peer, or the operator server are also **checked by value**, not just
+by key: a `wallet.esploraurl`, `wallet.feeurl`, `wallet.btcwallet_peers`, `wallet.btcwallet_addpeers`,
+or `server` value that points at a local or private address — loopback, an RFC1918 or link-local
+address (including `169.254.169.254`), an IPv6 link-local or unique-local address, or a
+`.internal`/`.local`/`.lan` name — is refused, because `waved` runs on the server and would otherwise
+be a way to make the server itself fetch or connect to addresses on its own internal network. A
+server administrator saving such a value is allowed to (they may genuinely run their own esplora, a
+bitcoind peer, or an Ark operator on their LAN); anyone else asks their administrator. Note that this
+validation does not resolve DNS, so a public hostname that resolves to a private address at fetch
+time still gets through: the check narrows what is reachable rather than closing the class of attack
+off entirely.
+
+`server` gets one more check on top, for everyone, admin or not: it must be a plain `host:port`
+(optionally with a leading `http://` or `https://`, which is stripped before it reaches `waved`) and
+nothing else. This isn't optional strictness — `waved` hands this value to gRPC's own dialer
+unparsed, and gRPC treats an `xyz://` prefix as *choosing a resolver*, not as part of an address
+validated as a whole. A value like `passthrough://8.8.8.8/127.0.0.1:10029` looks like it points at
+the public address `8.8.8.8` to a check that only inspects a URI's host — which is exactly how
+BTCPay core's own save-time check reads it, since it predates this plugin needing `server` to mean
+anything more specific than "an address BTCPay doesn't consider local" — but gRPC's `passthrough`
+resolver ignores that address entirely and dials the literal endpoint after the slash instead:
+`127.0.0.1:10029`, reaching another store's `waved` instance on loopback rather than anything public.
+Rejecting any shape but a bare host:port closes that off rather than relying on a check that was
+never written with gRPC's target syntax in mind.
 
 **Before switching a store's wallet backend or network, delete its existing wallet first** —
 `waved` can't switch backend or network on an existing wallet in place. Changing flags on an
