@@ -278,13 +278,25 @@ public sealed class WavedProcessManager : BackgroundService, IDisposable
     /// </summary>
     private void ReserveNewSlot(string storeId, WavelengthServerSettings settings)
     {
-        var running = GetRunningStoreIds().Count + _startingStoreIds.Count;
-        if (running >= settings.MaxStoreProcesses)
+        // Counted as the number of UNIQUE store ids across both sets, not the sum of their counts.
+        // A store mid-restart (see ReserveOrCarryOverSlotForRestartAsync) is briefly in BOTH: still
+        // in _stores (StopStoreAsync has not run yet) and already in _startingStoreIds (its slot was
+        // carried over before the stop specifically so it is never left uncounted, even for an
+        // instant - see that method's doc comment). Summing GetRunningStoreIds().Count and
+        // _startingStoreIds.Count would count that one store twice during the overlap, inflating the
+        // total by one and refusing a DIFFERENT store's perfectly legitimate reservation even though
+        // real capacity exists - observed concretely with a limit of 2, only store A running, and A
+        // restarting: the carried-over reservation alone would read as 2 processes, leaving no room
+        // for store B's unrelated first start to be counted at all.
+        var runningIds = new HashSet<string>(GetRunningStoreIds());
+        runningIds.UnionWith(_startingStoreIds);
+
+        if (runningIds.Count >= settings.MaxStoreProcesses)
         {
             _logger.LogWarning(
                 "Refusing to start waved for store {StoreId}: {Running} processes are already " +
                 "running or starting, which is at the configured limit of {Limit}",
-                storeId, running, settings.MaxStoreProcesses);
+                storeId, runningIds.Count, settings.MaxStoreProcesses);
 
             throw new InvalidOperationException(
                 $"The limit of {settings.MaxStoreProcesses} running waved processes has been reached. " +
