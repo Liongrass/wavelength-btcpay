@@ -212,6 +212,13 @@ validation does not resolve DNS, so a public hostname that resolves to a private
 time still gets through: the check narrows what is reachable rather than closing the class of attack
 off entirely.
 
+An administrator's approval is scoped to the *value* they actually saved, not a blanket "this store
+may use local values" permission: a store owner can keep saving the exact same approved local value
+(nothing to re-approve there), but cannot swap it for a *different* local address afterward without
+another administrator save. Without this, approving one private endpoint - a LAN esplora, say - would
+otherwise let the store owner silently redirect that same flag to the highest-value SSRF target,
+`169.254.169.254`, with no further administrator involvement at all.
+
 When set, `server` gets one more check on top of BTCPay's own, for everyone, admin or not: this
 plugin requires it to be a plain `host:port` (optionally with a leading `http://` or `https://`,
 which is stripped before it reaches `waved`) and nothing else. This isn't optional strictness —

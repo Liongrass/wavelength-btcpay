@@ -11,6 +11,7 @@ public sealed class FakeStoreApprovals : IWavedStoreApprovals
 {
     private readonly Dictionary<string, bool> _approved = new();
     private readonly Dictionary<string, bool> _allowLocalEndpoints = new();
+    private readonly Dictionary<string, IReadOnlyDictionary<string, string>> _persistedFlags = new();
 
     /// <summary>How many times an approval was recorded, so a test can assert a read wrote nothing.</summary>
     public int WriteCount { get; private set; }
@@ -21,9 +22,19 @@ public sealed class FakeStoreApprovals : IWavedStoreApprovals
         _allowLocalEndpoints[storeId] = allowLocalEndpoints;
     }
 
+    /// <summary>
+    /// Stands in for a store's ExtraWavedFlags row - what WavedProcessManager would have persisted
+    /// from this store's last accepted save, independent of the approval markers above.
+    /// </summary>
+    public void PersistFlags(string storeId, IReadOnlyDictionary<string, string> flags)
+        => _persistedFlags[storeId] = flags;
+
     public bool IsApproved(string storeId) => _approved.ContainsKey(storeId);
 
     public bool AllowsLocalEndpoints(string storeId) => _allowLocalEndpoints.TryGetValue(storeId, out var v) && v;
+
+    public IReadOnlyDictionary<string, string>? GetPersistedFlags(string storeId)
+        => _persistedFlags.GetValueOrDefault(storeId);
 
     public Task ApproveAsync(string storeId, bool allowLocalValues, CancellationToken cancellationToken = default)
     {

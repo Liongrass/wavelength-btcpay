@@ -249,6 +249,78 @@ public class WavelengthLightningConnectionStringHandlerTests
         Assert.Equal("http://127.0.0.1:5000/api", extraFlags["wallet.esploraurl"]);
     }
 
+    private static Dictionary<string, string> Flags(params (string Key, string Value)[] entries)
+        => entries.ToDictionary(e => e.Key, e => e.Value, StringComparer.OrdinalIgnoreCase);
+
+    // The exact scenario reported: an administrator approved wallet.esploraurl pointed at a LAN
+    // esplora (127.0.0.1), which set AllowLocalEndpoints for this store - a blanket "this store may
+    // use local values", not "this store may use 127.0.0.1 specifically". Without this check, a
+    // later non-admin save redirecting that same key to the cloud metadata endpoint was accepted
+    // purely because the marker was already true, with BTCPay core's own IsSafe providing no
+    // backstop for this key at all (it only ever looks at "server").
+    [Fact]
+    public void RejectsANonAdminSaveThatRedirectsAnApprovedLocalFlagToADifferentLocalAddress()
+    {
+        var persisted = Flags((WavedFlagValues.EsploraUrlFlag, "http://127.0.0.1:5000/api"));
+        var redirected = Flags((WavedFlagValues.EsploraUrlFlag, "http://169.254.169.254/latest/meta-data/"));
+
+        Assert.False(WavelengthLightningConnectionStringHandler.LocalValuesMatchWhatIsAlreadyPersisted(
+            redirected, persisted));
+    }
+
+    // The allowance this check must preserve: a non-admin re-saving the exact same connection
+    // string (same local value, nothing introduced or changed) must keep working without needing
+    // the administrator to approve it all over again.
+    [Fact]
+    public void AcceptsANonAdminSaveThatMerelyRepeatsTheAlreadyApprovedLocalValue()
+    {
+        var persisted = Flags((WavedFlagValues.EsploraUrlFlag, "http://127.0.0.1:5000/api"));
+        var repeated = Flags((WavedFlagValues.EsploraUrlFlag, "http://127.0.0.1:5000/api"));
+
+        Assert.True(WavelengthLightningConnectionStringHandler.LocalValuesMatchWhatIsAlreadyPersisted(
+            repeated, persisted));
+    }
+
+    // Changing or adding an unrelated, non-local flag alongside an untouched local one must not
+    // itself demand re-approval - only the local value's own identity matters.
+    [Fact]
+    public void AcceptsANonAdminSaveThatChangesAnUnrelatedNonLocalFlag()
+    {
+        var persisted = Flags(
+            (WavedFlagValues.EsploraUrlFlag, "http://127.0.0.1:5000/api"),
+            ("network", "mainnet"));
+        var changedElsewhere = Flags(
+            (WavedFlagValues.EsploraUrlFlag, "http://127.0.0.1:5000/api"),
+            ("network", "signet"));
+
+        Assert.True(WavelengthLightningConnectionStringHandler.LocalValuesMatchWhatIsAlreadyPersisted(
+            changedElsewhere, persisted));
+    }
+
+    // A local value that was never approved for this store at all (nothing persisted yet) must not
+    // be accepted just because some OTHER store, or a prior session, happened to set the marker -
+    // GetPersistedFlags returning null is "nothing to compare against", not "anything goes".
+    [Fact]
+    public void RejectsANewLocalValueWhenNothingIsPersistedYet()
+    {
+        var candidate = Flags((WavedFlagValues.EsploraUrlFlag, "http://10.0.0.5/api"));
+
+        Assert.False(WavelengthLightningConnectionStringHandler.LocalValuesMatchWhatIsAlreadyPersisted(
+            candidate, persistedFlags: null));
+    }
+
+    // A flag whose new value is public (not local at all) was never gated by the escape hatch in
+    // the first place - whether it changed relative to what is persisted is irrelevant.
+    [Fact]
+    public void AcceptsANonAdminSaveThatChangesAUrlFlagToADifferentPublicValue()
+    {
+        var persisted = Flags((WavedFlagValues.EsploraUrlFlag, "https://esplora.example.com/api"));
+        var changedToAnotherPublicUrl = Flags((WavedFlagValues.EsploraUrlFlag, "https://mempool.space/api"));
+
+        Assert.True(WavelengthLightningConnectionStringHandler.LocalValuesMatchWhatIsAlreadyPersisted(
+            changedToAnotherPublicUrl, persisted));
+    }
+
     // Each key carries a value that passes its own check as well as the key allowlist: the two
     // URL-shaped keys need a real public URL, and everything else is a plain count/duration/enum.
     [Theory]

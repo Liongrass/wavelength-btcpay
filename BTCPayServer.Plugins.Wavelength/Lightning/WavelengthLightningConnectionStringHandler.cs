@@ -142,10 +142,36 @@ public sealed class WavelengthLightningConnectionStringHandler : ILightningConne
         // approved store carrying a local server= value. isServerAdmin still has to stay in the OR: a
         // brand new admin save introducing a local value for the first time has nothing in the marker
         // yet (RecordApproval below is what writes it, and only after this call succeeds), so without
-        // isServerAdmin that very save would reject itself. A non-admin's attempt to save a NEW local
-        // value is unaffected either way - the marker is false until an admin's own save sets it, so
-        // strict validation still applies to that save in full.
+        // isServerAdmin that very save would reject itself.
+        //
+        // AllowsLocalEndpoints is a blanket "this store may carry local values at all", though, not
+        // "this store may carry THESE SPECIFIC local values" - so for an actual non-admin SAVE (a
+        // request context naming this store, as opposed to a background re-read of what is already
+        // persisted), the marker alone is not enough: it must also be true that this save is not
+        // introducing or changing which local value is used. Otherwise an administrator approving one
+        // private endpoint (their own LAN esplora, say) would silently let the store owner replace it
+        // with any other local address afterward, including the highest-value SSRF target
+        // (169.254.169.254) - reproduced directly: after an admin approves
+        // wallet.esploraurl=http://127.0.0.1:5000/api, a non-admin save of
+        // wallet.esploraurl=http://169.254.169.254/latest/meta-data/ was accepted purely because the
+        // marker was already true, with BTCPay core's own IsSafe check providing no backstop for this
+        // particular key at all. A background re-read is unaffected - see
+        // LocalValuesMatchWhatIsAlreadyPersisted's doc comment for why it is deliberately not asked
+        // there.
         var allowLocal = isServerAdmin || _storeApprovals.AllowsLocalEndpoints(storeId);
+        if (!isServerAdmin && allowLocal && context is not null && actingStoreId is not null)
+        {
+            // allowLocal=true here is only to extract the flags for comparison, not the final
+            // verdict - a disallowed key or malformed value fails identically regardless of
+            // allowLocal (see WavedFlagValues: the escape hatch gates locality, not parsing), so a
+            // failure here is never masked by this being more lenient than the real check below.
+            if (!TryParseExtraFlags(connectionString, out var candidateFlags, out error, allowLocal: true))
+                return null;
+
+            if (!LocalValuesMatchWhatIsAlreadyPersisted(candidateFlags, _storeApprovals.GetPersistedFlags(storeId)))
+                allowLocal = false;
+        }
+
         if (!TryParseExtraFlags(connectionString, out var extraFlags, out error, allowLocal))
             return null;
 
@@ -267,6 +293,47 @@ public sealed class WavelengthLightningConnectionStringHandler : ILightningConne
     /// </summary>
     private static bool HasLocalFlagValues(IReadOnlyDictionary<string, string> extraFlags)
         => !WavedFlagValues.Validate(extraFlags, out _, allowLocal: false);
+
+    /// <summary>
+    /// Whether every address-valued flag in candidateFlags that needs the local-endpoint escape
+    /// hatch to pass strict validation already has that EXACT value in persistedFlags - i.e. whether
+    /// this non-admin save only re-saves local values an administrator already reviewed, rather than
+    /// introducing or changing one. See Create's call site for why this distinction matters: a
+    /// single persisted marker means "may use local values at all", not "may use THESE local
+    /// values", and conflating the two lets a store owner redirect an admin-approved local endpoint
+    /// to any other local address with no further admin involvement.
+    ///
+    /// Only asked for an actual save (a request context naming this store) - deliberately never for
+    /// a background re-read of a string that is, by definition, already exactly what was last
+    /// persisted, so there is nothing for it to have changed relative to. Asking it there would be
+    /// redundant at best, and would break every Lightning operation on a store whose saved string
+    /// still carries an approved local value the instant GetPersistedFlags raced a concurrent write
+    /// (a real possibility, since that read and the ExtraWavedFlags row it compares against are not
+    /// part of one transaction) - a background consumer has no admin to blame that on and no save to
+    /// refuse, only a payment that must not spuriously fail.
+    ///
+    /// Checked per flag, not as a whole-string comparison: changing or adding an unrelated,
+    /// non-local flag (network=signet, say) alongside an untouched local one must not itself demand
+    /// re-approval, and a flag whose new value validates fine strictly (a public URL, a non-address
+    /// flag entirely) was never gated by the escape hatch in the first place, so whether it changed
+    /// is irrelevant here.
+    /// </summary>
+    internal static bool LocalValuesMatchWhatIsAlreadyPersisted(
+        IReadOnlyDictionary<string, string> candidateFlags, IReadOnlyDictionary<string, string>? persistedFlags)
+    {
+        foreach (var (key, value) in candidateFlags)
+        {
+            if (WavedFlagValues.Validate(new Dictionary<string, string> { [key] = value }, out _, allowLocal: false))
+                continue;
+
+            if (persistedFlags is null ||
+                !persistedFlags.TryGetValue(key, out var persistedValue) ||
+                !string.Equals(persistedValue, value, StringComparison.Ordinal))
+                return false;
+        }
+
+        return true;
+    }
 
     private IHttpContextAccessor? ResolveHttpContextAccessor()
     {

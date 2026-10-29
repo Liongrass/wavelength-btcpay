@@ -59,6 +59,22 @@ public interface IWavedStoreApprovals
     bool AllowsLocalEndpoints(string storeId);
 
     /// <summary>
+    /// This store's currently persisted extra waved flags - the ones from its last accepted save -
+    /// or null if none have ever been persisted.
+    ///
+    /// <see cref="AllowsLocalEndpoints"/> is a blanket "this store may carry local values at all",
+    /// not "this store may carry THESE SPECIFIC local values": an administrator approving one
+    /// private endpoint (their own LAN esplora, say) must not thereby let a later non-admin save
+    /// swap it for any other local address, including the highest-value SSRF target
+    /// (169.254.169.254) - only for re-saving the value an administrator actually reviewed. This is
+    /// what a non-admin save compares its own address-valued flags against to tell "re-saving an
+    /// already-approved value" apart from "introducing or changing one" - see
+    /// WavelengthLightningConnectionStringHandler.Create. Synchronous and cached for the same reason
+    /// <see cref="IsApproved"/> is.
+    /// </summary>
+    IReadOnlyDictionary<string, string>? GetPersistedFlags(string storeId);
+
+    /// <summary>
     /// Records that this store has been adopted, and whether it may carry local/private endpoint
     /// values. Called only for accepted administrator saves (see the handler's RecordApproval), so
     /// the write happens rarely; the implementation is still responsible for writing nothing when
@@ -195,6 +211,11 @@ public sealed class WavedStoreSettingsStore(StoreRepository storeRepository) : I
     /// <see cref="IsApproved"/>.</summary>
     public bool AllowsLocalEndpoints(string storeId)
         => GetAsync(storeId).GetAwaiter().GetResult().AllowLocalEndpoints;
+
+    /// <summary>See <see cref="IWavedStoreApprovals.GetPersistedFlags"/> - a cached read, same as
+    /// <see cref="IsApproved"/>.</summary>
+    public IReadOnlyDictionary<string, string>? GetPersistedFlags(string storeId)
+        => GetAsync(storeId).GetAwaiter().GetResult().ExtraWavedFlags;
 
     /// <summary>See <see cref="IWavedStoreApprovals.ApproveAsync"/> - writes only when one of the two
     /// facts actually changes, so the unauthenticated invoice path (which reaches the handler with a
