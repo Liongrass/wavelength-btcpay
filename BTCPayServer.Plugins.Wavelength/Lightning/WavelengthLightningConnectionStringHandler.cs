@@ -145,19 +145,20 @@ public sealed class WavelengthLightningConnectionStringHandler : ILightningConne
         // isServerAdmin that very save would reject itself.
         //
         // AllowsLocalEndpoints is a blanket "this store may carry local values at all", though, not
-        // "this store may carry THESE SPECIFIC local values" - so for an actual non-admin SAVE (a
-        // request context naming this store, as opposed to a background re-read of what is already
-        // persisted), the marker alone is not enough: it must also be true that this save is not
-        // introducing or changing which local value is used. Otherwise an administrator approving one
-        // private endpoint (their own LAN esplora, say) would silently let the store owner replace it
-        // with any other local address afterward, including the highest-value SSRF target
-        // (169.254.169.254) - reproduced directly: after an admin approves
-        // wallet.esploraurl=http://127.0.0.1:5000/api, a non-admin save of
-        // wallet.esploraurl=http://169.254.169.254/latest/meta-data/ was accepted purely because the
-        // marker was already true, with BTCPay core's own IsSafe check providing no backstop for this
-        // particular key at all. A background re-read is unaffected - see
-        // LocalValuesMatchWhatIsAlreadyPersisted's doc comment for why it is deliberately not asked
-        // there.
+        // "this store may carry THESE SPECIFIC local values" - so for any non-admin request that
+        // names this store (a request context with an actingStoreId, as opposed to a true background
+        // re-read with no request behind it at all - see LocalValuesMatchWhatIsAlreadyPersisted's doc
+        // comment for why those are treated the same regardless of whether the caller is actually
+        // saving a new string or merely reconstructing a client for one already saved), the marker
+        // alone is not enough: it must also be true that the candidate flags are not introducing or
+        // changing which local value is used, compared against what was recorded the moment an
+        // administrator last approved. Otherwise an administrator approving one private endpoint
+        // (their own LAN esplora, say) would silently let the store owner replace it with any other
+        // local address afterward, including the highest-value SSRF target (169.254.169.254) -
+        // reproduced directly: after an admin approves wallet.esploraurl=http://127.0.0.1:5000/api, a
+        // non-admin save of wallet.esploraurl=http://169.254.169.254/latest/meta-data/ was accepted
+        // purely because the marker was already true, with BTCPay core's own IsSafe check providing no
+        // backstop for this particular key at all. A true background re-read is unaffected.
         var allowLocal = isServerAdmin || _storeApprovals.AllowsLocalEndpoints(storeId);
         if (!isServerAdmin && allowLocal && context is not null && actingStoreId is not null)
         {
@@ -168,7 +169,7 @@ public sealed class WavelengthLightningConnectionStringHandler : ILightningConne
             if (!TryParseExtraFlags(connectionString, out var candidateFlags, out error, allowLocal: true))
                 return null;
 
-            if (!LocalValuesMatchWhatIsAlreadyPersisted(candidateFlags, _storeApprovals.GetPersistedFlags(storeId)))
+            if (!LocalValuesMatchWhatIsAlreadyPersisted(candidateFlags, _storeApprovals.GetApprovedLocalFlags(storeId)))
                 allowLocal = false;
         }
 
@@ -282,7 +283,7 @@ public sealed class WavelengthLightningConnectionStringHandler : ILightningConne
     private void RecordApproval(string storeId, bool isServerAdmin, IReadOnlyDictionary<string, string> extraFlags)
     {
         if (isServerAdmin)
-            _storeApprovals.ApproveAsync(storeId, allowLocalValues: HasLocalFlagValues(extraFlags))
+            _storeApprovals.ApproveAsync(storeId, allowLocalValues: HasLocalFlagValues(extraFlags), extraFlags)
                 .GetAwaiter().GetResult();
     }
 
@@ -303,14 +304,19 @@ public sealed class WavelengthLightningConnectionStringHandler : ILightningConne
     /// values", and conflating the two lets a store owner redirect an admin-approved local endpoint
     /// to any other local address with no further admin involvement.
     ///
-    /// Only asked for an actual save (a request context naming this store) - deliberately never for
-    /// a background re-read of a string that is, by definition, already exactly what was last
-    /// persisted, so there is nothing for it to have changed relative to. Asking it there would be
-    /// redundant at best, and would break every Lightning operation on a store whose saved string
-    /// still carries an approved local value the instant GetPersistedFlags raced a concurrent write
-    /// (a real possibility, since that read and the ExtraWavedFlags row it compares against are not
-    /// part of one transaction) - a background consumer has no admin to blame that on and no save to
-    /// refuse, only a payment that must not spuriously fail.
+    /// Only asked when there is a request context naming this store - never for a true background
+    /// re-read (the Lightning listener, a payout processor, a cron-driven poll), where there is no
+    /// request to compare against anything and nothing for a value to have changed relative to.
+    /// That includes requests that merely reconstruct a client from an already-saved string rather
+    /// than save a new one - an invoice's checkout page, most commonly, which carries this store's id
+    /// but no administrator. Those are deliberately not told apart from an actual save here: both
+    /// compare the same way, against <see cref="WavedStoreSettingsStore.GetApprovedLocalFlags"/>,
+    /// which WavedStoreSettingsStore.ApproveAsync records in the very same write as the approval
+    /// itself (see WavedStoreSettings.ApprovedLocalFlags for why it is captured there rather than
+    /// read from the store's current, separately-written ExtraWavedFlags) - so a request that merely
+    /// reconstructs a client for a value an admin already approved finds a match immediately, with no
+    /// dependency on when or whether anything else has started waved for this store yet, and an
+    /// actual change still requires the admin who can make one.
     ///
     /// Checked per flag, not as a whole-string comparison: changing or adding an unrelated,
     /// non-local flag (network=signet, say) alongside an untouched local one must not itself demand

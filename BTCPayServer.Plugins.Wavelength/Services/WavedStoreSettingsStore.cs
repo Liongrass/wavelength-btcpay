@@ -59,8 +59,10 @@ public interface IWavedStoreApprovals
     bool AllowsLocalEndpoints(string storeId);
 
     /// <summary>
-    /// This store's currently persisted extra waved flags - the ones from its last accepted save -
-    /// or null if none have ever been persisted.
+    /// The extra waved flags that were in effect the moment this store's approval was last recorded
+    /// - or null if it has never been approved with any. See
+    /// <see cref="WavedStoreSettings.ApprovedLocalFlags"/> for why this is captured at approval time
+    /// rather than read from the store's current ExtraWavedFlags.
     ///
     /// <see cref="AllowsLocalEndpoints"/> is a blanket "this store may carry local values at all",
     /// not "this store may carry THESE SPECIFIC local values": an administrator approving one
@@ -72,16 +74,22 @@ public interface IWavedStoreApprovals
     /// WavelengthLightningConnectionStringHandler.Create. Synchronous and cached for the same reason
     /// <see cref="IsApproved"/> is.
     /// </summary>
-    IReadOnlyDictionary<string, string>? GetPersistedFlags(string storeId);
+    IReadOnlyDictionary<string, string>? GetApprovedLocalFlags(string storeId);
 
     /// <summary>
-    /// Records that this store has been adopted, and whether it may carry local/private endpoint
-    /// values. Called only for accepted administrator saves (see the handler's RecordApproval), so
-    /// the write happens rarely; the implementation is still responsible for writing nothing when
-    /// neither fact would change - an ordinary Lightning operation by an approved store reaches the
-    /// handler with a context attached and must not pay for a write on the hottest path there is.
+    /// Records that this store has been adopted, whether it may carry local/private endpoint values,
+    /// and - in the same write - the exact flags that were approved, so a later comparison has
+    /// something correct to compare against the instant this call returns (see
+    /// <see cref="WavedStoreSettings.ApprovedLocalFlags"/>). Called only for accepted administrator
+    /// saves (see the handler's RecordApproval), so the write happens rarely; the implementation is
+    /// still responsible for writing nothing when none of those facts would change - an ordinary
+    /// Lightning operation performed by an administrator (an admin's own API key creating an
+    /// invoice, say) reaches the handler with isServerAdmin true and must not pay for a write on
+    /// every single one of those calls.
     /// </summary>
-    Task ApproveAsync(string storeId, bool allowLocalValues, CancellationToken cancellationToken = default);
+    Task ApproveAsync(
+        string storeId, bool allowLocalValues, IReadOnlyDictionary<string, string> extraFlags,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -212,18 +220,19 @@ public sealed class WavedStoreSettingsStore(StoreRepository storeRepository) : I
     public bool AllowsLocalEndpoints(string storeId)
         => GetAsync(storeId).GetAwaiter().GetResult().AllowLocalEndpoints;
 
-    /// <summary>See <see cref="IWavedStoreApprovals.GetPersistedFlags"/> - a cached read, same as
+    /// <summary>See <see cref="IWavedStoreApprovals.GetApprovedLocalFlags"/> - a cached read, same as
     /// <see cref="IsApproved"/>.</summary>
-    public IReadOnlyDictionary<string, string>? GetPersistedFlags(string storeId)
-        => GetAsync(storeId).GetAwaiter().GetResult().ExtraWavedFlags;
+    public IReadOnlyDictionary<string, string>? GetApprovedLocalFlags(string storeId)
+        => GetAsync(storeId).GetAwaiter().GetResult().ApprovedLocalFlags;
 
-    /// <summary>See <see cref="IWavedStoreApprovals.ApproveAsync"/> - writes only when one of the two
-    /// facts actually changes, so the unauthenticated invoice path (which reaches the handler with a
-    /// request context attached, and therefore reaches this) stops at an in-memory comparison.
-    /// Called only for actual administrator saves - see the handler's RecordApproval for why a
-    /// save allowed through by AllowForAllStores records nothing.</summary>
+    /// <summary>See <see cref="IWavedStoreApprovals.ApproveAsync"/> - writes only when one of the
+    /// three recorded facts actually changes, so an administrator's own ordinary Lightning
+    /// operations (which reach the handler with isServerAdmin true, and therefore reach this) stop at
+    /// an in-memory comparison. Called only for actual administrator saves - see the handler's
+    /// RecordApproval for why a save allowed through by AllowForAllStores records nothing.</summary>
     public async Task ApproveAsync(
-        string storeId, bool allowLocalValues, CancellationToken cancellationToken = default)
+        string storeId, bool allowLocalValues, IReadOnlyDictionary<string, string> extraFlags,
+        CancellationToken cancellationToken = default)
     {
         var settings = await GetAsync(storeId, cancellationToken);
 
@@ -232,13 +241,15 @@ public sealed class WavedStoreSettingsStore(StoreRepository storeRepository) : I
         // accumulates for the same reason - an admin who allowed local endpoints and then saves a
         // string without any must not drop the marker out from under a process already using one.
         var allowLocal = settings.AllowLocalEndpoints || allowLocalValues;
-        if (settings.ServerAdminApproved && settings.AllowLocalEndpoints == allowLocal)
+        if (settings.ServerAdminApproved && settings.AllowLocalEndpoints == allowLocal &&
+            WavedProcessManager.FlagsEqual(settings.ApprovedLocalFlags, extraFlags))
             return;
 
         await UpdateAsync(storeId, current => current with
         {
             ServerAdminApproved = true,
-            AllowLocalEndpoints = current.AllowLocalEndpoints || allowLocalValues
+            AllowLocalEndpoints = current.AllowLocalEndpoints || allowLocalValues,
+            ApprovedLocalFlags = new Dictionary<string, string>(extraFlags, StringComparer.OrdinalIgnoreCase)
         }, cancellationToken);
     }
 }

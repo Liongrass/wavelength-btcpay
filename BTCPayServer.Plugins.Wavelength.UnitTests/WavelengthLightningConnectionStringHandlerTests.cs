@@ -299,7 +299,7 @@ public class WavelengthLightningConnectionStringHandlerTests
 
     // A local value that was never approved for this store at all (nothing persisted yet) must not
     // be accepted just because some OTHER store, or a prior session, happened to set the marker -
-    // GetPersistedFlags returning null is "nothing to compare against", not "anything goes".
+    // GetApprovedLocalFlags returning null is "nothing to compare against", not "anything goes".
     [Fact]
     public void RejectsANewLocalValueWhenNothingIsPersistedYet()
     {

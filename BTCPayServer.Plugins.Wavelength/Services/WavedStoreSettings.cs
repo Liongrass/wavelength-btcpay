@@ -64,4 +64,25 @@ public sealed record WavedStoreSettings
     /// WavedFlagValues rejects.
     /// </summary>
     public Dictionary<string, string>? ExtraWavedFlags { get; init; }
+
+    /// <summary>
+    /// The exact extra waved flags that were in effect the moment a server administrator last
+    /// recorded approval for this store (see WavedStoreSettingsStore.ApproveAsync) - distinct from
+    /// <see cref="ExtraWavedFlags"/> above, which WavedProcessManager persists separately, only once
+    /// a connection string actually starts (or restarts) waved for this store, and through a write
+    /// path (WavedProcessManager talks to StoreRepository directly) that does not go through this
+    /// class's cache.
+    ///
+    /// That gap used to be what a non-admin's address-valued flags were checked against: immediately
+    /// after an admin approved, say, wallet.esploraurl=http://127.0.0.1:5000/api, nothing had
+    /// started waved yet, so ExtraWavedFlags was still empty - and the very next request to rebuild
+    /// this store's Lightning client (a checkout, most commonly, which carries a request context and
+    /// this store's id but no administrator) found nothing to compare the just-approved value
+    /// against and rejected it as an unapproved local address. Recording the approved flags here, in
+    /// the same write that sets ServerAdminApproved/AllowLocalEndpoints, means what this store is
+    /// allowed to keep using is available the instant the approval is recorded, with no dependency on
+    /// whether or when ExtraWavedFlags later catches up. See
+    /// WavelengthLightningConnectionStringHandler.LocalValuesMatchWhatIsAlreadyPersisted.
+    /// </summary>
+    public Dictionary<string, string>? ApprovedLocalFlags { get; init; }
 }
